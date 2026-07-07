@@ -895,17 +895,21 @@ async function refresh() {
     return;
   }
 
-  // Nothing on the Pi means the idle dashboard is showing unless Apple TV is
-  // the active input. Do not label background Apple TV music as TV playback.
-  setWatchActive('dashboard');
+  // Nothing on the Pi's HDMI. Either the Apple TV is the active input, or the
+  // idle dashboard is showing.
   showLibrary(false);
   showTransport('');
-  const state = activeInput === 'appletv' ? await api('GET', '/api/atv/state') : { ok: false };
-  if (state.ok && state.data?.title) {
-    $('#np-eyebrow').textContent = 'Now Playing';
-    $('#np-title').textContent = state.data.title;
-    $('#np-sub').textContent = state.data.subtitle || [state.data.artist, state.data.app].filter(Boolean).join(' · ');
+  if (activeInput === 'appletv') {
+    setWatchActive('appletv');          // reflect it in "Watch on the TV"
+    const state = await api('GET', '/api/atv/state');
+    const d = state.ok ? (state.data || {}) : {};
+    $('#np-eyebrow').textContent = 'Apple TV';
+    $('#np-title').textContent = 'Apple TV';
+    $('#np-sub').textContent = d.title
+      ? [d.title, d.artist, d.app].filter(Boolean).join(' · ')
+      : 'On the TV';
   } else {
+    setWatchActive('dashboard');
     $('#np-eyebrow').textContent = 'Dashboard';
     $('#np-title').textContent = 'Dashboard';
     $('#np-sub').textContent = 'Idle — showing the living-room dashboard';
