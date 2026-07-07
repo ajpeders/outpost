@@ -37,6 +37,10 @@ IPC_SOCKET = os.environ.get("SCREEN_MPV_IPC", "/tmp/mpv-ipc")  # for sub toggle 
 KIOSK_SERVICE = os.environ.get("SCREEN_KIOSK_SERVICE", "kiosk-screen")
 CURSOR_INSTALL = os.environ.get(
     "SCREEN_CURSOR_INSTALL", "/home/alex/livingroom-pi/screen/install-cursor.sh")
+# Reclaims the TV's HDMI input for the Pi (CEC active-source) — the Apple TV
+# steals the input when it wakes; this switches the TV back to the dashboard.
+TV_RECLAIM = os.environ.get(
+    "SCREEN_TV_RECLAIM", "/home/alex/livingroom-pi/screen/tv-reclaim.sh")
 
 
 def _kiosk(action: str) -> None:
@@ -69,6 +73,13 @@ def _cursor_repair() -> dict:
         _kiosk("restart")
     return {"ok": r.returncode == 0, "status": _kiosk_status(),
             "output": (r.stdout or r.stderr).strip()}
+
+
+def _tv_reclaim() -> dict:
+    """Switch the TV back to the Pi's HDMI input (the idle dashboard)."""
+    r = subprocess.run(["bash", TV_RECLAIM],
+                       capture_output=True, text=True, check=False)
+    return {"ok": r.returncode == 0, "output": (r.stdout or r.stderr).strip()}
 
 PORT = int(os.environ.get("SCREEN_PORT", "9595"))
 # SMB-mounted media library (direct file play — no transcode)
@@ -443,6 +454,9 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200 if result["ok"] else 500, result)
         elif self.path == "/kiosk/cursor":
             result = _cursor_repair()
+            self._send(200 if result["ok"] else 500, result)
+        elif self.path == "/tv/reclaim":
+            result = _tv_reclaim()
             self._send(200 if result["ok"] else 500, result)
         elif self.path == "/control":
             action = str(body.get("action", ""))

@@ -45,6 +45,8 @@ services:
       JETSTREAM_URL: ${JETSTREAM_URL:-}
       JETSTREAM_TITLE: ${JETSTREAM_TITLE:-}
       JETSTREAM_TITLE_URL: ${JETSTREAM_TITLE_URL:-}
+      JETSTREAM_SKIP_URL: ${JETSTREAM_SKIP_URL:-}
+      JETSTREAM_COOKIE: ${JETSTREAM_COOKIE:-}
     volumes:
       - ./data/hub:/data              # alarms.json + cached aerials live here
       - ./hub/app/static:/app/app/static   # serve dashboard/index edits without a rebuild

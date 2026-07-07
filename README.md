@@ -63,6 +63,20 @@ curl -s  http://<pi>:8010/api/apps                     # list installed apps + b
 curl -sX POST http://<pi>:8010/api/launch/com.netflix.Netflix
 ```
 
+## Scenes
+
+One-tap combos the hub fires against itself (TV + Apple TV control sequences).
+Edit `data/hub/scenes.json` (no rebuild needed) or rely on the bundled defaults:
+
+```sh
+curl -s  http://<pi>:8080/api/scenes                              # {"movie":"Movie Night", ...}
+curl -sX POST http://<pi>:8080/api/scenes/movie/run              # fires Movie Night
+```
+
+Step shape: `{"svc":"cec"|"atv", "method":"POST", "path":"/api/..."}` or
+`{"delay":<seconds>}`. Falls back to the in-code defaults if the JSON is
+missing or invalid.
+
 ## CEC quick test
 
 ```sh

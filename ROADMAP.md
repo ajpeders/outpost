@@ -24,14 +24,21 @@ the TV set (CEC), hosts the hub app, and runs scheduled automations.
   clock/weather/now-playing/alarm kiosk; phone-first, no TV input required.
   Built: 1080p-friendly ambient stills, weather caching, transparent cursor
   repair, and optimized kiosk launcher.
-- **Phase 5 — Scenes expansion** 🔧 *in progress* Built: **Movie Night** (CEC on →
-  ATV on → launch Plex), **YouTube**, **Everything Off**. Scenes are data-driven
-  (`/data/scenes.json`, falls back to defaults) — tune + add more (Music, Bedtime).
-- **Phase 6 — Live-stream transport controls** ⏳ *(requested)* Add on-screen /
-  web-app controls for the Pi screen player's live stream: **skip / next**, plus
-  play-pause and stop. The mpv screen player already exposes `/api/screen/control`
-  + an IPC socket; this is the UI + a "next source" action wired to it (in the hub
-  remote, and later the on-TV kiosk).
+- **Phase 5 — Scenes expansion** ✅ *(built)* Data-driven via `data/hub/scenes.json`
+  (falls back to `scenes.DEFAULT_SCENES` in code if missing/invalid). The hub now
+  exposes `GET /api/scenes` (list) + `POST /api/scenes/{name}/run` (execute).
+  The web app renders one button per scene under the Alarms panel; each click
+  fires the step sequence and toasts the result count. Shipped: **Movie Night**
+  (CEC on → ATV on → launch Plex), **YouTube**, **Everything Off**. Add more in
+  the JSON — `{label, steps: [{svc, method, path} | {delay}]}` — no rebuild.
+- **Phase 6 — Live-stream transport controls** ✅ *(built)* Hub now exposes
+  `POST /api/jetstream/skip` + `GET /api/jetstream/capabilities` (the latter tells
+  the UI whether skip is wired). The web app's Now-Playing card shows a **⤵ Skip**
+  button on the live row; the hub POSTs `JETSTREAM_SKIP_URL` with the `lt` viewer
+  cookie so it advances the queue the same way a regular browser viewer does.
+  mpv / the Apple TV pick up the new HLS playlist automatically. Set
+  `JETSTREAM_SKIP_URL` + `JETSTREAM_COOKIE` in `.env`; leave blank to hide the
+  button.
 - **Phase 7 — Alarm: pick a specific album / playlist** ⏳ *(requested)* Today the
   appletv_music alarm just launches Apple Music and hits play (resumes the last
   thing). Companion is remote-control only — it **can't** address a specific Apple

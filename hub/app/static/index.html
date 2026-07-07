@@ -205,6 +205,7 @@
       <button data-seek="30" aria-label="Forward 30 seconds">30s »</button>
     </div>
     <div class="transport2 hidden" id="transport2">
+      <button id="np-skip" class="secondary hidden">⤵ Skip</button>
       <button id="np-cc" class="secondary">CC · Subtitles</button>
       <button id="np-stop" class="stop">■ Stop</button>
     </div>
@@ -324,6 +325,21 @@
               <button type="button" class="secondary" id="a-cancel">Cancel</button>
             </div>
           </form>
+        </div>
+      </section>
+
+    <section class="panel">
+        <div class="panel-head">
+          <h2 class="panel-title">Scenes</h2>
+          <div class="panel-note">One-tap combos</div>
+        </div>
+        <div class="panel-body">
+          <div class="tv-grid" id="scenes-list" style="grid-template-columns:1fr;gap:8px">
+            <span class="muted">Loading…</span>
+          </div>
+          <div class="muted hidden" id="scenes-tip" style="margin-top:10px;font-size:11px">
+            Edit <code>data/hub/scenes.json</code> on the Pi to add or tune.
+          </div>
         </div>
       </section>
 
@@ -656,11 +672,87 @@ function showTransport(kind) {  // '', 'media', 'live'
   $('#transport').classList.toggle('hidden', !media);          // seek + pause: media only
   $('#transport2').classList.toggle('hidden', !(media || live)); // stop row: any playback
   $('#np-cc').classList.toggle('hidden', !media);              // subtitles: media only
+  // Skip only renders while live AND the hub is wired for it. showTransport runs
+  // every refresh so this picks up late capability loads (initial /capabilities
+  // fetch races with the first status poll) without a separate timer.
+  $('#np-skip').classList.toggle('hidden', !(live && jetstreamCaps.skip));
 }
 $$('#transport [data-seek]').forEach(b => b.addEventListener('click', () => screenControl('seek', Number(b.dataset.seek))));
 $('#pp').addEventListener('click', async () => { await screenControl('pause'); setTimeout(refresh, 200); });
 $('#np-stop').addEventListener('click', async () => { toast('Stopping'); await api('POST', '/api/screen/stop'); await api('POST', '/api/jetstream/stop'); });
 $('#np-cc').addEventListener('click', async () => { toast('Subtitles: cycling'); await api('POST', '/api/media/subtitles'); });
+
+/* --- jetstream Skip (Phase 6): same-LAN proxy of the regular viewer skip.
+   The hub only advertises the button when /capabilities says skip is wired, so a
+   blank JETSTREAM_SKIP_URL keeps the UI honest instead of teasing a dead button. */
+let jetstreamCaps = { configured: false, skip: false };
+async function loadJetstreamCaps() {
+  try {
+    const r = await api('GET', '/api/jetstream/capabilities');
+    if (r.ok && r.data) jetstreamCaps = r.data;
+  } catch (e) { /* keep defaults */ }
+}
+function syncSkipButton() {
+  // Only relevant while a live stream is on the TV; showTransport() owns visibility
+  // within the live row. This just decides whether the button is in the DOM at all.
+  $('#np-skip').classList.toggle('hidden', !jetstreamCaps.skip);
+}
+$('#np-skip').addEventListener('click', async () => {
+  const btn = $('#np-skip');
+  setBusy(btn, true);
+  // Brief visual ack — the jetstream queue moves async and the UI shouldn't feel dead.
+  btn.style.background = 'var(--accent)';
+  btn.style.color = '#fff';
+  try {
+    const r = await api('POST', '/api/jetstream/skip');
+    if (r.ok && r.data?.ok) toast('⤵ Voted — next clip incoming…');
+    else toast('Skip failed: ' + (r.data?.error || r.data?.detail || (r.status ? 'HTTP ' + r.status : 'unreachable')));
+  } finally {
+    setTimeout(() => {
+      btn.style.background = '';
+      btn.style.color = '';
+      setBusy(btn, false);
+    }, 600);
+  }
+});
+// Initial fetch — first refresh() awaits this (see bottom of file) so the button's
+// show/hide state is correct on first paint without a separate timing dependency.
+loadJetstreamCaps();
+
+/* --- scenes (one-tap combos from data/hub/scenes.json) --- */
+let scenesCache = {};
+async function loadScenes() {
+  const node = $('#scenes-list');
+  const r = await api('GET', '/api/scenes');
+  if (!r.ok || !r.data || !Object.keys(r.data).length) {
+    node.innerHTML = '<span class="muted">No scenes configured</span>';
+    return;
+  }
+  scenesCache = r.data;
+  node.innerHTML = '';
+  // Order scenes by key for stable layout; labels come from the JSON.
+  Object.keys(r.data).sort().forEach(name => {
+    const label = r.data[name] || name;
+    const btn = document.createElement('button');
+    btn.className = 'secondary';
+    btn.textContent = label;
+    btn.dataset.scene = name;
+    btn.addEventListener('click', () => runScene(name, btn));
+    node.appendChild(btn);
+  });
+  $('#scenes-tip').classList.remove('hidden');
+}
+async function runScene(name, btn) {
+  toast('Running "' + (scenesCache[name] || name) + '"…');
+  setBusy(btn, true);
+  const r = await api('POST', '/api/scenes/' + encodeURIComponent(name) + '/run');
+  setBusy(btn, false);
+  if (!r.ok) { toast(r.data?.error || 'Scene failed'); return; }
+  const failed = (r.data?.results || []).filter(x => !x.ok);
+  if (failed.length) toast('Scene ran with ' + failed.length + ' step failure(s)');
+  else toast('✓ ' + (r.data?.label || name));
+}
+loadScenes();
 
 /* --- media library (SMB share) --- */
 let mediaLoaded = false, mediaPath = '';
@@ -801,8 +893,9 @@ async function refresh() {
   }
 }
 
-refresh();
-refreshTvState();
+// Load jetstream capabilities before the first refresh so the Skip button's
+// show/hide state is right on first paint (showTransport reads jetstreamCaps).
+(async () => { await loadJetstreamCaps(); refresh(); refreshTvState(); })();
 setInterval(refresh, 4000);
 setInterval(refreshTvState, 10000);
 </script>

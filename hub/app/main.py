@@ -22,6 +22,7 @@ from fastapi.staticfiles import StaticFiles
 
 from . import alarms
 from . import plex as plexmod
+from . import scenes as scenesmod
 
 ATV_URL = os.environ.get("ATV_URL", "http://localhost:8010").rstrip("/")
 CEC_URL = os.environ.get("CEC_URL", "http://localhost:8020").rstrip("/")
@@ -34,6 +35,11 @@ SCREEN_URL = os.environ.get("SCREEN_URL", "http://localhost:9595").rstrip("/")
 JETSTREAM_URL = os.environ.get("JETSTREAM_URL", "")
 JETSTREAM_TITLE = os.environ.get("JETSTREAM_TITLE", "").strip()
 JETSTREAM_TITLE_URL = os.environ.get("JETSTREAM_TITLE_URL", "").strip()
+# Viewer-API endpoints on the homelab jetstream. Same `lt` cookie auth as the title
+# discovery endpoint (the HLS path itself bypasses auth on the LAN). SKIP_URL is
+# optional — when unset the Skip button on the Now-Playing card hides itself so the
+# UI never advertises a control that isn't wired.
+JETSTREAM_SKIP_URL = os.environ.get("JETSTREAM_SKIP_URL", "").strip()
 # Optional cookie for the mpv-on-Pi fallback (/api/screen/livestream). With the
 # jetstream LAN bypass in place the Pi reaches /hls tokenless, so this is only
 # needed if that bypass is ever removed; empty → no Cookie header.
@@ -213,6 +219,23 @@ async def test_alarm(alarm_id: str):
     return await scheduler.fire(a)
 
 
+# --- Scenes (data-driven; defaults from scenes.py, override at data/hub/scenes.json)
+@app.get("/api/scenes")
+async def list_scenes():
+    """Available scenes as {name: label}. The UI uses this to render one button per
+    scene; the engine reads the JSON live on each /run so edits don't need a rebuild."""
+    return {name: meta.get("label", name)
+            for name, meta in scenesmod.load_scenes().items()}
+
+
+@app.post("/api/scenes/{name}/run")
+async def run_scene(name: str):
+    try:
+        return await scenesmod.run_scene(name, client, ATV_URL, CEC_URL)
+    except KeyError:
+        return JSONResponse(status_code=404, content={"error": f"no such scene: {name}"})
+
+
 # --- Plex music (browse + AirPlay to the Apple TV) ---
 @app.get("/api/plex/sections")
 async def plex_sections():
@@ -312,6 +335,17 @@ async def screen_control(body: dict):
     return Response(content=r.content, status_code=r.status_code, media_type="application/json")
 
 
+@app.post("/api/screen/reclaim")
+async def screen_reclaim():
+    """Switch the TV back to the Pi's HDMI input (the dashboard). The Apple TV
+    grabs the input when it wakes; this re-asserts the Pi as CEC active source."""
+    try:
+        r = await client.post(f"{SCREEN_URL}/tv/reclaim")
+    except httpx.RequestError as exc:
+        return JSONResponse(status_code=502, content={"error": f"screen player unreachable: {exc}"})
+    return Response(content=r.content, status_code=r.status_code, media_type="application/json")
+
+
 @app.post("/api/screen/stop")
 async def screen_stop():
     global _active_input
@@ -376,6 +410,35 @@ async def jetstream_stop():
     """Stop the AirPlay stream on the Apple TV."""
     await client.post(f"{ATV_URL}/api/stream/stop")
     return {"ok": True}
+
+
+@app.get("/api/jetstream/capabilities")
+async def jetstream_capabilities():
+    """What jetstream viewer-API features the hub knows how to drive.
+    The UI polls this so the Skip button only renders when it's actually wired."""
+    return {
+        "configured": bool(JETSTREAM_URL),
+        "skip": bool(JETSTREAM_SKIP_URL),
+    }
+
+
+@app.post("/api/jetstream/skip")
+async def jetstream_skip():
+    """Advance the jetstream queue, same way a regular viewer's Skip button does.
+    The hub is just a same-LAN proxy: the viewer cookie (JETSTREAM_COOKIE) authenticates
+    against the homelab jetstream, which moves to the next clip and feeds the new
+    manifest down the HLS pipeline. mpv (or the Apple TV) picks it up automatically
+    because both are already subscribed to the live playlist.
+    """
+    if not JETSTREAM_SKIP_URL:
+        raise HTTPException(status_code=503, detail="JETSTREAM_SKIP_URL not configured")
+    try:
+        r = await client.post(JETSTREAM_SKIP_URL,
+                              headers=_jetstream_headers(), timeout=10.0)
+    except httpx.RequestError as exc:
+        return JSONResponse(status_code=502,
+                            content={"error": f"jetstream unreachable: {exc}"})
+    return {"ok": r.is_success, "status": r.status_code}
 
 
 # --- Media library (SMB share, played directly on the Pi) ---
@@ -454,17 +517,17 @@ async def input_appletv():
 
 @app.post("/api/input/pi")
 async def input_pi():
-    """Switch the TV to the Pi's HDMI input (announce the Pi as active source)."""
+    """Switch the TV to the Pi's HDMI input (the dashboard).
+
+    The CEC service's bare `as` (source/active) does not switch this TV. The
+    screen player's /tv/reclaim runs the sequence that does (cec-ctl: register as
+    a playback device → image-view-on → active-source with the Pi's real physical
+    address). It also wakes the TV, so no separate tv/on is needed.
+    """
     global _active_input
-    errors = [
-        err for err in (
-            await _post_required(f"{CEC_URL}/api/tv/on", "TV power"),
-            await _post_required(f"{CEC_URL}/api/source/active", "Pi input select"),
-        )
-        if err
-    ]
-    if errors:
-        return JSONResponse(status_code=502, content={"ok": False, "error": "; ".join(errors)})
+    err = await _post_required(f"{SCREEN_URL}/tv/reclaim", "Pi input select")
+    if err:
+        return JSONResponse(status_code=502, content={"ok": False, "error": err})
     _active_input = "pi"
     return {"ok": True, "input": "pi"}
 

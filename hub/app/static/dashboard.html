@@ -9,11 +9,17 @@
   * { margin: 0; padding: 0; box-sizing: border-box; cursor: none !important; }
   html, body { height: 100%; overflow: hidden; }
   body {
-    font-family: "SF Pro Display", Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    font-family: "DejaVu Sans Mono", "JetBrains Mono", "Cascadia Code", ui-monospace, Menlo, Consolas, monospace;
     color: #f4f7fb;
     background: #05070d;
     -webkit-font-smoothing: antialiased;
+    letter-spacing: -0.01em;
   }
+  /* simplistic monochrome (white) line icons — no color emoji */
+  .icon { display: inline-block; width: 1em; height: 1em; vertical-align: -0.12em; }
+  .icon svg { width: 100%; height: 100%; display: block; fill: none;
+              stroke: #fff; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+  .icon .fill { fill: #fff; stroke: none; }
 
   /* ambient background: rotating scenic photo with a slow drift, over an aurora gradient */
   .bg, #aurora { position: fixed; inset: 0; z-index: -2; }
@@ -126,14 +132,27 @@ let LAT = Number(params.get('lat')) || 39.7392;
 let LON = Number(params.get('lon')) || -104.9903;
 let CITY = params.get('city') || '';   // fallback; auto-detected below
 const WEATHER_CACHE_KEY = 'livingroom-dashboard-weather-v2';
-const WCODE = {  // open-meteo weather codes -> [emoji, label]
-  0:['☀️','Clear'],1:['🌤️','Mostly clear'],2:['⛅','Partly cloudy'],3:['☁️','Cloudy'],
-  45:['🌫️','Fog'],48:['🌫️','Rime fog'],51:['🌦️','Light drizzle'],53:['🌦️','Drizzle'],55:['🌧️','Drizzle'],
-  61:['🌧️','Light rain'],63:['🌧️','Rain'],65:['🌧️','Heavy rain'],66:['🌧️','Freezing rain'],67:['🌧️','Freezing rain'],
-  71:['🌨️','Light snow'],73:['🌨️','Snow'],75:['❄️','Heavy snow'],77:['🌨️','Snow grains'],
-  80:['🌦️','Showers'],81:['🌧️','Showers'],82:['⛈️','Heavy showers'],85:['🌨️','Snow showers'],86:['❄️','Snow showers'],
-  95:['⛈️','Thunderstorm'],96:['⛈️','Thunderstorm'],99:['⛈️','Hailstorm'] };
-const wx = c => WCODE[c] || ['·',''];
+// simplistic monochrome (white) line icons — no color emoji
+const ICONS = {
+  sun:'<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.6v2.5M12 18.9v2.5M4.6 4.6l1.8 1.8M17.6 17.6l1.8 1.8M2.6 12h2.5M18.9 12h2.5M4.6 19.4l1.8-1.8M17.6 6.4l1.8-1.8"/></svg>',
+  partly:'<svg viewBox="0 0 24 24"><circle cx="8" cy="7.5" r="2.8"/><path d="M8 2.4v1.5M3.5 7.5H2M13 7.5h-1.5M4.6 4.1l1 1M11.4 4.1l-1 1"/><path d="M7.5 19.5h8.2a3.3 3.3 0 0 0 .3-6.6 4.7 4.7 0 0 0-8.9-1 3.6 3.6 0 0 0 .4 7.2z"/></svg>',
+  cloud:'<svg viewBox="0 0 24 24"><path d="M7 18h9.4a3.5 3.5 0 0 0 .3-7 5 5 0 0 0-9.6-1.2A3.9 3.9 0 0 0 7 18z"/></svg>',
+  fog:'<svg viewBox="0 0 24 24"><path d="M4 8h13M3 12h18M5 16h13M8 20h9"/></svg>',
+  rain:'<svg viewBox="0 0 24 24"><path d="M7 14.5h9.4a3.5 3.5 0 0 0 .3-7 5 5 0 0 0-9.6-1.2A3.9 3.9 0 0 0 7 14.5z"/><path d="M9 17.5l-1 2.6M12.5 17.5l-1 2.6M16 17.5l-1 2.6"/></svg>',
+  snow:'<svg viewBox="0 0 24 24"><path d="M7 14.5h9.4a3.5 3.5 0 0 0 .3-7 5 5 0 0 0-9.6-1.2A3.9 3.9 0 0 0 7 14.5z"/><circle class="fill" cx="9" cy="18.6" r=".7"/><circle class="fill" cx="12.5" cy="19.6" r=".7"/><circle class="fill" cx="16" cy="18.6" r=".7"/></svg>',
+  storm:'<svg viewBox="0 0 24 24"><path d="M7 14h9.4a3.5 3.5 0 0 0 .3-7 5 5 0 0 0-9.6-1.2A3.9 3.9 0 0 0 7 14z"/><path d="M12.5 15l-2.2 3.4h2.4l-1.6 2.8"/></svg>',
+  dot:'<svg viewBox="0 0 24 24"><circle class="fill" cx="12" cy="12" r="2"/></svg>',
+  alarm:'<svg viewBox="0 0 24 24"><circle cx="12" cy="13" r="6.5"/><path d="M12 10v3l2 1.3M5.5 6.5 3.2 4.6M18.5 6.5l2.3-1.9M7.6 18.6 6 20.6M16.4 18.6 18 20.6"/></svg>',
+};
+const iconHTML = k => '<span class="icon">' + (ICONS[k] || ICONS.dot) + '</span>';
+const WCODE = {  // open-meteo weather codes -> [icon key, label]
+  0:['sun','Clear'],1:['partly','Mostly clear'],2:['partly','Partly cloudy'],3:['cloud','Cloudy'],
+  45:['fog','Fog'],48:['fog','Rime fog'],51:['rain','Light drizzle'],53:['rain','Drizzle'],55:['rain','Drizzle'],
+  61:['rain','Light rain'],63:['rain','Rain'],65:['rain','Heavy rain'],66:['rain','Freezing rain'],67:['rain','Freezing rain'],
+  71:['snow','Light snow'],73:['snow','Snow'],75:['snow','Heavy snow'],77:['snow','Snow grains'],
+  80:['rain','Showers'],81:['rain','Showers'],82:['storm','Heavy showers'],85:['snow','Snow showers'],86:['snow','Snow showers'],
+  95:['storm','Thunderstorm'],96:['storm','Thunderstorm'],99:['storm','Hailstorm'] };
+const wx = c => WCODE[c] || ['dot',''];
 
 const el = {
   time: document.getElementById('time'),
@@ -190,7 +209,7 @@ async function geolocate() {
 function renderWeather(r, city) {
   if (!r || !r.current || !r.daily) return;
   const [ic, label] = wx(r.current.weather_code);
-  el.wxIcon.textContent = ic;
+  el.wxIcon.innerHTML = iconHTML(ic);
   el.wxTemp.textContent = Math.round(r.current.temperature_2m) + '°';
   el.wxCond.textContent = city ? (label + ' · ' + city) : label;
   const days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
@@ -202,7 +221,7 @@ function renderWeather(r, city) {
     const [di] = wx(r.daily.weather_code[i]);
     const hi = Math.round(r.daily.temperature_2m_max[i]);
     const lo = Math.round(r.daily.temperature_2m_min[i]);
-    fc.innerHTML = `<div class="d">${dow}</div><div class="i">${di}</div><div class="t">${hi}° <span class="lo">${lo}°</span></div>`;
+    fc.innerHTML = `<div class="d">${dow}</div><div class="i">${iconHTML(di)}</div><div class="t">${hi}° <span class="lo">${lo}°</span></div>`;
     frag.appendChild(fc);
   }
   el.forecast.replaceChildren(frag);
@@ -389,11 +408,8 @@ async function nextAlarm() {
     const SRC = { appletv_music: 'Apple Music', livestream: 'Livestream',
       shuffle: 'Shuffle movies/TV', file: 'Server file', airplay: 'AirPlay' };
     const src = best.a.source || (best.a.method === 'airplay' ? 'airplay' : 'appletv_music');
-    el.alarmNext.replaceChildren(
-      document.createTextNode('⏰ '),
-      Object.assign(document.createElement('span'), { className: 't', textContent: tm }),
-      document.createTextNode(when + ' · ' + (SRC[src] || 'Apple Music'))
-    );
+    el.alarmNext.innerHTML = iconHTML('alarm') + ' <span class="t">' + tm + '</span>'
+      + (when + ' · ' + (SRC[src] || 'Apple Music'));
   } catch (e) { el.alarmNext.textContent = ''; }
 }
 nextAlarm(); setInterval(nextAlarm, 60 * 1000);
