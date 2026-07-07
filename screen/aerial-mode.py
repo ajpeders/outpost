@@ -57,11 +57,18 @@ def _connect_ipc(timeout: float = 20.0):
 
 
 def _render_overlay() -> bool:
-    """Dashboard(overlay) -> transparent PNG -> raw BGRA that mpv can overlay."""
+    """Dashboard(overlay) -> transparent PNG -> raw BGRA that mpv can overlay.
+
+    Uses a PERSISTENT chromium profile so the dashboard's localStorage weather
+    cache survives between renders — otherwise every render is a cold browser
+    that must re-fetch weather (external, slow) within the virtual-time budget,
+    and intermittently snapshots before it lands (blank weather/alarm). With the
+    cache warm, the page paints weather immediately on load."""
     r = subprocess.run(
         ["chromium", "--headless=new", "--no-sandbox", "--disable-gpu",
          "--hide-scrollbars", "--default-background-color=00000000",
-         f"--window-size={W},{H}", "--virtual-time-budget=4000",
+         "--user-data-dir=/tmp/aerial-chrome-profile",
+         f"--window-size={W},{H}", "--virtual-time-budget=8000",
          f"--screenshot={PNG}", DASH_URL],
         capture_output=True)
     if r.returncode != 0 or not os.path.exists(PNG):
