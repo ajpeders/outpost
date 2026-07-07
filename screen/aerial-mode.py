@@ -93,11 +93,14 @@ def main() -> None:
     with open(playlist, "w") as fh:
         fh.write("\n".join(clips) + "\n")
 
-    # --vo=gpu-next + --hwdec=auto = zero-copy Pi-5 HEVC decode (the V3D GPU imports
-    # the decoder's DRM-PRIME frames): ~15% CPU at 4K, no dropped frames. Plain
-    # --vo=drm forces drm-copy (frames copied to RAM) which burns ~2.3 cores.
+    # --vo=gpu --gpu-context=drm --hwdec=auto: the V3D GPU imports the Pi-5 HEVC
+    # decoder's frames zero-copy and scans them out via GL/KMS — native 4K at ~19%
+    # CPU, smooth. NOTE: use --vo=gpu, NOT gpu-next: gpu-next renders internally but
+    # scans out solid PURPLE on this V3D. Plain --vo=drm displays but drm-copy can't
+    # sustain 4K (frozen). (AERIAL_VO overrides.)
+    vo = os.environ.get("AERIAL_VO", "gpu")
     _mpv = subprocess.Popen(
-        ["mpv", "--vo=gpu-next", "--gpu-context=drm", f"--drm-mode={DRM_MODE}",
+        ["mpv", f"--vo={vo}", "--gpu-context=drm", f"--drm-mode={DRM_MODE}",
          "--hwdec=auto", "--loop-playlist=inf", "--shuffle", "--no-audio",
          "--no-config", f"--input-ipc-server={IPC}", "--force-window=yes",
          "--really-quiet", f"--playlist={playlist}"])
