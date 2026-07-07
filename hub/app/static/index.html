@@ -246,7 +246,7 @@
             <button id="w-dash" class="secondary" data-watch="dashboard">🖥 Dashboard</button>
             <button id="w-appletv" class="secondary" data-watch="appletv">📺 Apple TV</button>
           </div>
-          <button id="w-music" class="secondary" style="width:100%;margin-top:8px">🎵 Play Apple Music (Apple TV)</button>
+          <button id="w-music" class="secondary" data-watch="music" style="width:100%;margin-top:8px">🎵 Play Apple Music (Apple TV)</button>
           <div id="library-controls" class="hidden">
             <div class="music-results" id="media-list" style="margin-top:10px"><span class="muted">Loading…</span></div>
             <button id="w-shuffle" class="secondary music-stop">🔀 Shuffle library</button>
@@ -900,14 +900,20 @@ async function refresh() {
   showLibrary(false);
   showTransport('');
   if (activeInput === 'appletv') {
-    setWatchActive('appletv');          // reflect it in "Watch on the TV"
     const state = await api('GET', '/api/atv/state');
     const d = state.ok ? (state.data || {}) : {};
-    $('#np-eyebrow').textContent = 'Apple TV';
-    $('#np-title').textContent = 'Apple TV';
-    $('#np-sub').textContent = d.title
-      ? [d.title, d.artist, d.app].filter(Boolean).join(' · ')
-      : 'On the TV';
+    const isMusic = d.app_id === 'com.apple.TVMusic' || d.app === 'Music';
+    if (isMusic) {
+      setWatchActive('music');          // playing Apple Music -> highlight that
+      $('#np-eyebrow').textContent = 'Apple Music';
+      $('#np-title').textContent = d.title || 'Apple Music';
+      $('#np-sub').textContent = [d.artist, d.album].filter(Boolean).join(' · ') || 'On the Apple TV';
+    } else {
+      setWatchActive('appletv');        // just on the Apple TV -> highlight it
+      $('#np-eyebrow').textContent = 'Apple TV';
+      $('#np-title').textContent = 'Apple TV';
+      $('#np-sub').textContent = d.title ? [d.title, d.app].filter(Boolean).join(' · ') : 'On the TV';
+    }
   } else {
     setWatchActive('dashboard');
     $('#np-eyebrow').textContent = 'Dashboard';
