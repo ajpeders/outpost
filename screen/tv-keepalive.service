@@ -1,0 +1,14 @@
+[Unit]
+Description=Keep the dashboard alive when the Apple TV drags the TV off (CEC)
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/bin/python3 /home/alex/livingroom-pi/screen/tv-keepalive.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
