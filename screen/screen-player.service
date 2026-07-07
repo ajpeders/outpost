@@ -1,0 +1,16 @@
+[Unit]
+Description=Living-room screen player (mpv on the Pi HDMI, controlled by the hub)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# root so mpv can become DRM master on the console
+User=root
+Environment=SCREEN_PORT=9595
+ExecStart=/usr/bin/python3 /home/alex/livingroom-pi/screen/screen_player.py
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

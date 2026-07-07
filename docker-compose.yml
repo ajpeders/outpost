@@ -1,0 +1,53 @@
+# Self-contained living-room stack — runs entirely on the Pi 5, no homelab
+# dependency. Both services use host networking: pyatv wants it for Apple TV
+# discovery/streaming, and CEC is local hardware anyway.
+services:
+  appletv:
+    container_name: appletv
+    build: ./appletv
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      TZ: ${TZ:-UTC}
+      ATV_ADDRESS: ${ATV_ADDRESS}
+      ATV_NAME: ${ATV_NAME:-Apple TV}
+      ATV_STORAGE: /data/pyatv.conf
+      PORT: ${ATV_API_PORT:-8010}
+    volumes:
+      - ./data/appletv:/data          # pyatv credential store
+
+  cec:
+    container_name: cec
+    build: ./cec
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      PORT: ${CEC_API_PORT:-8020}
+    devices:
+      - /dev/cec0:/dev/cec0           # the Pi 5 HDMI-CEC bus
+
+  hub:
+    container_name: hub
+    build: ./hub
+    restart: unless-stopped
+    network_mode: host                # localhost:8010/:8020 reach the two services
+    environment:
+      PORT: ${HUB_PORT:-8080}
+      ATV_URL: http://localhost:${ATV_API_PORT:-8010}
+      CEC_URL: http://localhost:${CEC_API_PORT:-8020}
+      TZ: ${TZ:-America/Denver}        # alarm times are wall-clock in this zone
+      PLEX_URL: ${PLEX_URL:-http://192.168.0.176:32400}
+      PLEX_TOKEN: ${PLEX_TOKEN:-}
+      # Pi-side mpv screen player (fallback) + the homelab jetstream broadcast.
+      # JETSTREAM_URL is the plain HLS manifest — jetstream grants /hls/ to LAN
+      # clients tokenless, so the AirPlaying Apple TV needs no auth in the URL.
+      SCREEN_URL: http://localhost:${SCREEN_PORT:-9595}
+      JETSTREAM_URL: ${JETSTREAM_URL:-}
+      JETSTREAM_TITLE: ${JETSTREAM_TITLE:-}
+      JETSTREAM_TITLE_URL: ${JETSTREAM_TITLE_URL:-}
+    volumes:
+      - ./data/hub:/data              # alarms.json + cached aerials live here
+      - ./hub/app/static:/app/app/static   # serve dashboard/index edits without a rebuild
+    depends_on:
+      - appletv
+      - cec

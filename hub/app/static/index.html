@@ -1,0 +1,810 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Living Room</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #101114;
+    --surface: #181a1f;
+    --surface-2: #22252c;
+    --surface-3: #2c3038;
+    --line: #383d47;
+    --fg: #f4f0ea;
+    --muted: #a9adb7;
+    --dim: #787f8d;
+    --accent: #2f8cff;
+    --accent-2: #18a87f;
+    --danger: #d85b62;
+    --warn: #e6b84a;
+    --shadow: 0 18px 48px rgba(0, 0, 0, .28);
+  }
+
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { min-height: 100%; }
+  body {
+    margin: 0;
+    font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: var(--bg);
+    color: var(--fg);
+  }
+  button, input, select { font: inherit; }
+  button { border: 0; color: var(--fg); cursor: pointer; touch-action: manipulation; }
+  button:disabled { cursor: not-allowed; opacity: .55; }
+
+  .shell { width: min(1120px, 100%); margin: 0 auto; padding: 18px 14px 28px; }
+
+  .topbar {
+    display: grid; grid-template-columns: minmax(0, 1fr) auto;
+    gap: 14px; align-items: center; padding: 14px 0 18px;
+  }
+  .eyebrow { color: var(--muted); font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+  h1 { margin: 3px 0 0; font-size: 28px; line-height: 1.05; font-weight: 750; }
+  .status-pill {
+    display: inline-flex; align-items: center; gap: 8px; min-height: 36px;
+    padding: 8px 12px; border: 1px solid var(--line); border-radius: 999px;
+    background: var(--surface); color: var(--muted); font-size: 13px; white-space: nowrap;
+  }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--warn); box-shadow: 0 0 0 4px rgba(230, 184, 74, .12); }
+  .dot.ok { background: var(--accent-2); box-shadow: 0 0 0 4px rgba(24, 168, 127, .13); }
+  .dot.bad { background: var(--danger); box-shadow: 0 0 0 4px rgba(216, 91, 98, .14); }
+
+  /* --- Now playing hero (the Pi's HDMI is the main screen) --- */
+  .hero {
+    display: grid; gap: 4px; padding: 18px;
+    border: 1px solid var(--line); border-radius: 8px;
+    background: var(--surface); box-shadow: var(--shadow);
+  }
+  .now-eyebrow { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; font-weight: 750; letter-spacing: .08em; text-transform: uppercase; }
+  .live-badge { display: inline-flex; align-items: center; gap: 5px; background: var(--danger); color: #fff; font-size: 11px; font-weight: 800; letter-spacing: .08em; padding: 3px 8px; border-radius: 6px; }
+  .now-title { min-height: 31px; overflow-wrap: anywhere; font-size: 25px; line-height: 1.18; font-weight: 720; margin-top: 4px; }
+  .now-sub { min-height: 20px; color: var(--muted); font-size: 14px; overflow-wrap: anywhere; }
+
+  .progress { height: 6px; border-radius: 999px; background: var(--surface-3); overflow: hidden; margin-top: 14px; }
+  .progress .bar { height: 100%; width: 0; background: var(--accent); transition: width .6s linear; }
+  .times { display: flex; justify-content: space-between; margin-top: 6px; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+
+  .transport { display: flex; gap: 8px; margin-top: 14px; }
+  .transport button { flex: 1; min-width: 0; min-height: 52px; border-radius: 8px; background: var(--surface-2); font-size: 15px; font-weight: 750; transition: background .12s ease, transform .08s ease; }
+  .transport button:hover { background: var(--surface-3); }
+  .transport button:active { transform: translateY(1px); }
+  .transport .pp { flex: 1.5; background: var(--fg); color: #111318; }
+  .transport2 { display: flex; gap: 8px; margin-top: 8px; }
+  .transport2 button { flex: 1; min-height: 46px; border-radius: 8px; background: var(--surface-2); font-size: 14px; font-weight: 700; }
+  .transport2 .stop { background: #43262b; color: #ffd8dc; }
+
+  .layout { display: grid; grid-template-columns: minmax(310px, 390px) minmax(0, 1fr); gap: 14px; align-items: start; margin-top: 14px; }
+  .stack { display: grid; gap: 14px; }
+
+  .panel { border: 1px solid var(--line); border-radius: 8px; background: var(--surface); overflow: hidden; }
+  .panel-head { display: flex; justify-content: space-between; gap: 12px; align-items: center; min-height: 48px; padding: 13px 14px; border-bottom: 1px solid var(--line); }
+  .panel-title { margin: 0; font-size: 13px; font-weight: 750; letter-spacing: .06em; text-transform: uppercase; }
+  .panel-note { color: var(--dim); font-size: 12px; text-align: right; }
+  .panel-body { padding: 14px; }
+
+  .remote { display: grid; gap: 12px; }
+  .dpad {
+    width: min(100%, 308px); aspect-ratio: 1; justify-self: center;
+    display: grid; grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(3, 1fr);
+    gap: 8px; padding: 8px; border-radius: 8px; background: var(--surface-2);
+  }
+  .dpad button, .control-grid button, .pair-actions button {
+    min-height: 52px; border-radius: 8px; background: var(--surface-2);
+    transition: background .12s ease, transform .08s ease, border-color .12s ease;
+  }
+  .dpad button { display: grid; place-items: center; font-size: 25px; }
+  .dpad .select { background: var(--fg); color: #111318; font-size: 14px; font-weight: 800; }
+  button:hover { background: var(--surface-3); }
+  button:active { transform: translateY(1px); }
+
+  .control-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+  .control-grid button { padding: 10px 8px; font-size: 14px; font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  .tv-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
+  .tv-grid button { min-height: 52px; border-radius: 8px; background: var(--surface-2); font-size: 13px; font-weight: 700; padding: 8px 6px; white-space: nowrap; }
+
+  .tv-grid button.active { background: var(--accent) !important; color: #fff !important; border-color: var(--accent) !important; }
+  .seg button { border: 1px solid var(--line); }
+
+  /* --- Media lists --- */
+  .music-results { display: grid; gap: 6px; max-height: 340px; overflow-y: auto; }
+  .music-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 9px 11px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); }
+  .music-row .m-title { font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .music-row .m-sub { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .music-row button { min-height: 34px; padding: 5px 13px; border-radius: 8px; background: var(--accent); color: #fff; font-size: 12px; font-weight: 700; }
+  .music-stop { width: 100%; min-height: 44px; border-radius: 8px; margin-top: 10px; }
+
+  /* --- Alarms --- */
+  .alarms { display: grid; gap: 10px; }
+  .alarm { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 12px 13px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); }
+  .alarm.off { opacity: .55; }
+  .alarm .time { font-size: 23px; font-weight: 780; font-variant-numeric: tabular-nums; }
+  .alarm .label { font-weight: 650; overflow-wrap: anywhere; }
+  .alarm .meta { color: var(--muted); font-size: 12px; margin-top: 2px; }
+  .alarm-actions { display: flex; gap: 6px; }
+  .alarm-actions button { min-height: 38px; padding: 6px 11px; border-radius: 8px; background: var(--surface-3); font-size: 12px; font-weight: 700; }
+  .alarm-actions button.on { background: var(--accent-2); color: #fff; }
+  .alarm-actions button.del { background: #43262b; color: #ffd8dc; }
+  .add-alarm { width: 100%; min-height: 48px; border-radius: 8px; background: var(--surface-2); font-weight: 750; border: 1px dashed var(--line); }
+  .alarm-form { display: grid; gap: 11px; padding: 13px; border: 1px dashed var(--line); border-radius: 8px; background: var(--surface-2); }
+  .alarm-form label { display: grid; gap: 5px; font-size: 12px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--dim); }
+  .alarm-form input, .alarm-form select { min-height: 46px; border: 1px solid var(--line); border-radius: 8px; background: #0d0e11; color: var(--fg); padding: 0 11px; font-size: 15px; }
+  .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .days { display: flex; gap: 5px; }
+  .days button { flex: 1; min-height: 40px; border-radius: 8px; background: var(--surface-3); font-size: 12px; font-weight: 800; }
+  .days button.on { background: var(--accent); color: #fff; }
+
+  .primary { background: var(--accent) !important; color: #fff; font-weight: 750; }
+  .danger { background: #4a252b !important; color: #ffd8dc; font-weight: 750; }
+  .secondary { background: var(--surface-2) !important; color: var(--fg); }
+
+  .pairing { display: grid; gap: 14px; }
+  .pairing p { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.45; }
+  .pair-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .pair-actions .full { grid-column: 1 / -1; }
+  .pin-row { display: grid; grid-template-columns: minmax(0, 1fr); }
+  .pin-row input { width: 100%; min-height: 56px; border: 1px solid var(--line); border-radius: 8px; background: #0d0e11; color: var(--fg); font-size: 24px; font-weight: 700; letter-spacing: .24em; text-align: center; }
+
+  .muted { color: var(--muted); font-size: 13px; }
+  .hidden { display: none !important; }
+
+  #toast {
+    position: fixed; left: 50%; bottom: 16px; z-index: 20; width: max-content;
+    max-width: calc(100% - 28px); transform: translateX(-50%) translateY(10px);
+    padding: 11px 14px; border: 1px solid var(--line); border-radius: 8px;
+    background: #252932; color: var(--fg); box-shadow: var(--shadow); font-size: 13px;
+    opacity: 0; pointer-events: none; transition: opacity .16s ease, transform .16s ease;
+  }
+  #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  @media (max-width: 760px) {
+    .shell { padding-inline: 12px; padding-bottom: 22px; }
+    .topbar { grid-template-columns: 1fr; gap: 10px; }
+    h1 { font-size: 25px; }
+    .status-pill { justify-self: start; }
+    .layout { grid-template-columns: 1fr; }
+    .panel-head { align-items: flex-start; flex-direction: column; gap: 3px; }
+    .panel-note { text-align: left; }
+    .tv-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+  @media (max-width: 390px) {
+    .control-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .field-row { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<main class="shell">
+  <div class="topbar">
+    <div>
+      <div class="eyebrow">Living Room</div>
+      <h1 id="dev">Controller</h1>
+    </div>
+    <div class="status-pill" id="status-pill">
+      <span class="dot" id="status-dot"></span>
+      <span id="status-text">Checking devices</span>
+    </div>
+  </div>
+
+  <!-- Now playing on the TV (Pi HDMI first; Apple TV metadata as fallback) -->
+  <section class="hero" aria-live="polite">
+    <div class="now-eyebrow"><span id="np-eyebrow">Now Playing</span></div>
+    <div class="now-title" id="np-title">Connecting</div>
+    <div class="now-sub" id="np-sub"></div>
+
+    <div class="progress hidden" id="np-progress"><div class="bar" id="np-bar"></div></div>
+    <div class="times hidden" id="np-times"><span id="np-pos">0:00</span><span id="np-dur">0:00</span></div>
+
+    <div class="transport hidden" id="transport">
+      <button data-seek="-30" aria-label="Back 30 seconds">« 30s</button>
+      <button data-seek="-10" aria-label="Back 10 seconds">« 10s</button>
+      <button class="pp" id="pp">⏸ Pause</button>
+      <button data-seek="10" aria-label="Forward 10 seconds">10s »</button>
+      <button data-seek="30" aria-label="Forward 30 seconds">30s »</button>
+    </div>
+    <div class="transport2 hidden" id="transport2">
+      <button id="np-cc" class="secondary">CC · Subtitles</button>
+      <button id="np-stop" class="stop">■ Stop</button>
+    </div>
+  </section>
+
+  <section class="panel hidden" id="pair" style="margin-top:14px">
+    <div class="panel-head">
+      <h2 class="panel-title">Apple TV Setup</h2>
+      <div class="panel-note">One-time pairing</div>
+    </div>
+    <div class="panel-body pairing">
+      <p id="pair-msg">This Apple TV is not paired yet.</p>
+      <button class="primary" id="pair-start">Start Pairing</button>
+      <div id="pair-pin" class="hidden pairing">
+        <div class="pin-row">
+          <input id="pin" inputmode="numeric" pattern="[0-9]*" maxlength="4" placeholder="PIN" autocomplete="one-time-code">
+        </div>
+        <div class="pair-actions">
+          <button class="primary" id="pair-submit">Submit PIN</button>
+          <button class="secondary" id="pair-cancel">Cancel</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div class="layout hidden" id="controls">
+    <div class="stack">
+      <!-- WATCH: the Pi's HDMI is the main screen now -->
+      <section class="panel">
+        <div class="panel-head">
+          <h2 class="panel-title">Watch on the TV</h2>
+          <div class="panel-note">Pi HDMI · HDR10</div>
+        </div>
+        <div class="panel-body">
+          <div class="tv-grid" style="grid-template-columns:repeat(3,minmax(0,1fr))">
+            <button id="w-live" class="secondary" data-watch="livestream">▶ Livestream</button>
+            <button id="w-library" class="secondary" data-watch="library">▦ Library</button>
+            <button id="w-dash" class="secondary" data-watch="dashboard">🖥 Dashboard</button>
+          </div>
+          <div id="library-controls" class="hidden">
+            <div class="music-results" id="media-list" style="margin-top:10px"><span class="muted">Loading…</span></div>
+            <button id="w-shuffle" class="secondary music-stop">🔀 Shuffle library</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- TV power + input, with the active source highlighted -->
+      <section class="panel">
+        <div class="panel-head">
+          <h2 class="panel-title">TV &amp; Input</h2>
+          <div class="panel-note" id="tv-status">Checking CEC</div>
+        </div>
+        <div class="panel-body">
+          <div class="tv-grid seg" id="input-seg" style="grid-template-columns:repeat(2,minmax(0,1fr));margin-bottom:8px">
+            <button id="in-atv" data-input="appletv">📺 Apple TV</button>
+            <button id="in-pi" data-input="pi">🖥 Pi</button>
+          </div>
+          <div class="tv-grid">
+            <button data-cec="/tv/on">On</button>
+            <button data-cec="/tv/off">Off</button>
+            <button data-cec="/tv/volume/down">Vol −</button>
+            <button data-cec="/tv/volume/up">Vol +</button>
+            <button data-cec="/tv/volume/mute">Mute</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2 class="panel-title">Alarms</h2>
+          <div class="panel-note">Wake-ups</div>
+        </div>
+        <div class="panel-body">
+          <div class="alarms" id="alarms"><span class="muted">Loading...</span></div>
+          <button class="add-alarm" id="add-alarm" style="margin-top:12px">+ Add alarm</button>
+
+          <form class="alarm-form hidden" id="alarm-form" style="margin-top:12px">
+            <div class="field-row">
+              <label>Time
+                <input type="time" id="a-time" required>
+              </label>
+              <label>Label
+                <input type="text" id="a-label" placeholder="Wake up" maxlength="40">
+              </label>
+            </div>
+
+            <label>Repeat
+              <div class="days" id="a-days">
+                <button type="button" data-day="0">Mo</button>
+                <button type="button" data-day="1">Tu</button>
+                <button type="button" data-day="2">We</button>
+                <button type="button" data-day="3">Th</button>
+                <button type="button" data-day="4">Fr</button>
+                <button type="button" data-day="5">Sa</button>
+                <button type="button" data-day="6">Su</button>
+              </div>
+            </label>
+
+            <label>Play
+              <select id="a-source">
+                <option value="appletv_music">Apple Music (Apple TV)</option>
+                <option value="livestream">Livestream (Pi)</option>
+                <option value="shuffle">Shuffle movies/TV (Pi)</option>
+                <option value="file">A file from the server (Pi)</option>
+              </select>
+            </label>
+
+            <label id="a-vol-wrap">Apple TV volume
+              <input type="number" id="a-volume" min="0" max="100" placeholder="30">
+            </label>
+            <label id="a-path-wrap" class="hidden">Library path (server file, or shuffle folder)
+              <input type="text" id="a-path" placeholder="Movies/Some Movie.mkv">
+            </label>
+
+            <div class="pair-actions">
+              <button type="submit" class="primary">Save alarm</button>
+              <button type="button" class="secondary" id="a-cancel">Cancel</button>
+            </div>
+          </form>
+        </div>
+      </section>
+
+    </div>
+
+    <div class="stack">
+      <section class="panel">
+        <div class="panel-head">
+          <h2 class="panel-title">Apple TV Remote</h2>
+          <div class="panel-note">Drive Apple TV apps · arrow keys work</div>
+        </div>
+        <div class="panel-body remote">
+          <div class="dpad" aria-label="Apple TV directional controls">
+            <span></span>
+            <button data-atv="up" aria-label="Up">▲</button>
+            <span></span>
+            <button data-atv="left" aria-label="Left">◀</button>
+            <button class="select" data-atv="select">OK</button>
+            <button data-atv="right" aria-label="Right">▶</button>
+            <span></span>
+            <button data-atv="down" aria-label="Down">▼</button>
+            <span></span>
+          </div>
+
+          <div class="control-grid">
+            <button data-atv="menu">Menu</button>
+            <button data-atv="home">Home</button>
+            <button data-atv="play_pause">Play/Pause</button>
+            <button data-atv="skip_backward">Back 10</button>
+            <button data-atv="skip_forward">Forward 10</button>
+            <button data-atv="top_menu">Top Menu</button>
+            <button data-atv="volume_down">Vol -</button>
+            <button data-atv="volume_up">Vol +</button>
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
+</main>
+
+<div id="toast"></div>
+
+<script>
+const $ = selector => document.querySelector(selector);
+const $$ = selector => Array.from(document.querySelectorAll(selector));
+
+async function api(method, path, body) {
+  const options = { method };
+  if (body) {
+    options.headers = {'content-type': 'application/json'};
+    options.body = JSON.stringify(body);
+  }
+  const response = await fetch(path, options);
+  let data = null;
+  try { data = await response.json(); } catch {}
+  return { ok: response.ok, status: response.status, data };
+}
+
+let toastTimer;
+function toast(message) {
+  const node = $('#toast');
+  node.textContent = message;
+  node.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => node.classList.remove('show'), 2600);
+}
+
+function setStatus(kind, text) {
+  const dot = $('#status-dot');
+  dot.className = 'dot' + (kind ? ' ' + kind : '');
+  $('#status-text').textContent = text;
+}
+
+function setBusy(button, busy) {
+  if (!button) return;
+  button.disabled = busy;
+  if (busy) {
+    button.dataset.label = button.textContent;
+    button.textContent = 'Working...';
+  } else if (button.dataset.label) {
+    button.textContent = button.dataset.label;
+    delete button.dataset.label;
+  }
+}
+
+function esc(s) {
+  return String(s || '').replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+}
+
+async function sendAtv(command, button) {
+  setBusy(button, true);
+  const result = await api('POST', '/api/atv/command/' + command);
+  setBusy(button, false);
+  if (!result.ok) toast(result.data?.error || result.data?.detail || 'Command failed');
+}
+
+async function sendCec(path, button) {
+  setBusy(button, true);
+  const result = await api('POST', '/api/cec' + path);
+  setBusy(button, false);
+  if (!result.ok) toast(result.data?.error || result.data?.detail || 'TV control unavailable');
+  else refreshTvState();
+}
+
+$$('[data-atv]').forEach(button => button.addEventListener('click', () => sendAtv(button.dataset.atv, button)));
+$$('[data-cec]').forEach(button => button.addEventListener('click', () => sendCec(button.dataset.cec, button)));
+
+document.addEventListener('keydown', event => {
+  const active = document.activeElement;
+  if (active && (active.tagName === 'INPUT' || active.tagName === 'SELECT')) return;
+  const map = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right', Enter: 'select', Escape: 'menu', ' ': 'play_pause' };
+  const command = map[event.key];
+  if (!command || $('#controls').classList.contains('hidden')) return;
+  event.preventDefault();
+  sendAtv(command);
+});
+
+/* --- pairing --- */
+$('#pair-start').addEventListener('click', async () => {
+  $('#pair-msg').textContent = 'Starting pairing. Watch for a PIN on the TV.';
+  const result = await api('POST', '/api/atv/pair/begin');
+  if (!result.ok) { $('#pair-msg').textContent = result.data?.error || 'Could not start pairing.'; return; }
+  $('#pair-start').classList.add('hidden');
+  $('#pair-pin').classList.remove('hidden');
+  $('#pair-msg').textContent = 'Enter the 4-digit PIN shown on the Apple TV.';
+  $('#pin').focus();
+});
+$('#pair-submit').addEventListener('click', async () => {
+  const pin = $('#pin').value.trim();
+  if (!pin) return;
+  setBusy($('#pair-submit'), true);
+  const result = await api('POST', '/api/atv/pair/finish', { pin });
+  setBusy($('#pair-submit'), false);
+  if (result.ok && result.data?.paired) { toast('Apple TV paired'); refresh(); return; }
+  $('#pair-msg').textContent = result.data?.error || 'Pairing failed. Try again.';
+  $('#pin').value = ''; $('#pin').focus();
+});
+$('#pair-cancel').addEventListener('click', async () => {
+  await api('POST', '/api/atv/pair/cancel');
+  $('#pair-pin').classList.add('hidden');
+  $('#pair-start').classList.remove('hidden');
+  $('#pair-msg').textContent = 'This Apple TV is not paired yet.';
+});
+$('#pin').addEventListener('keydown', event => { if (event.key === 'Enter') $('#pair-submit').click(); });
+
+/* --- alarms --- */
+const DAY_ABBR = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+const SOURCE_LABEL = { appletv_music: 'Apple Music', livestream: 'Livestream', shuffle: 'Shuffle', file: 'Server file', airplay: 'AirPlay' };
+
+function daysSummary(days) {
+  if (!days || !days.length || days.length === 7) return 'Every day';
+  const sorted = [...days].sort((a, b) => a - b);
+  if (sorted.join() === '0,1,2,3,4') return 'Weekdays';
+  if (sorted.join() === '5,6') return 'Weekends';
+  return sorted.map(d => DAY_ABBR[d]).join(' ');
+}
+
+function alarmSource(a) {
+  return a.source || (a.method === 'airplay' ? 'airplay' : 'appletv_music');
+}
+
+function renderAlarms(list) {
+  const node = $('#alarms');
+  if (!Array.isArray(list) || !list.length) { node.innerHTML = '<span class="muted">No alarms yet.</span>'; return; }
+  node.innerHTML = '';
+  list.sort((a, b) => a.time.localeCompare(b.time)).forEach(alarm => {
+    const row = document.createElement('div');
+    row.className = 'alarm' + (alarm.enabled ? '' : ' off');
+    const src = SOURCE_LABEL[alarmSource(alarm)] || 'Apple Music';
+    row.innerHTML =
+      '<div class="time">' + alarm.time + '</div>' +
+      '<div><div class="label">' + esc(alarm.label || 'Alarm') + '</div>' +
+      '<div class="meta">' + daysSummary(alarm.days) + ' · ' + src + '</div></div>';
+    const actions = document.createElement('div');
+    actions.className = 'alarm-actions';
+    const toggle = document.createElement('button');
+    toggle.textContent = alarm.enabled ? 'On' : 'Off';
+    if (alarm.enabled) toggle.classList.add('on');
+    toggle.onclick = async () => { await api('POST', '/api/alarms/' + alarm.id + '/toggle'); loadAlarms(); };
+    const test = document.createElement('button');
+    test.textContent = 'Test';
+    test.onclick = async () => {
+      test.disabled = true;
+      const orig = test.textContent; test.textContent = 'Testing…';
+      toast('Testing "' + (alarm.label || 'alarm') + '" — TV on + music in a few seconds…');
+      try {
+        const r = await api('POST', '/api/alarms/' + alarm.id + '/test');
+        if (r && r.ok) toast('✓ Fired — music should start shortly');
+        else toast('✗ Test failed' + (r ? ' (' + r.status + ')' : '') + (r && r.data && r.data.error ? ': ' + r.data.error : ''));
+      } catch (e) {
+        toast('✗ Test error: ' + (e && e.message ? e.message : e));
+      } finally {
+        test.disabled = false; test.textContent = orig;
+      }
+    };
+    const del = document.createElement('button');
+    del.textContent = 'Delete'; del.classList.add('del');
+    del.onclick = async () => { await api('DELETE', '/api/alarms/' + alarm.id); loadAlarms(); };
+    actions.append(toggle, test, del);
+    row.appendChild(actions);
+    node.appendChild(row);
+  });
+}
+
+async function loadAlarms() {
+  const result = await api('GET', '/api/alarms');
+  if (!result.ok) { $('#alarms').innerHTML = '<span class="muted">Alarms unavailable</span>'; return; }
+  renderAlarms(result.data);
+}
+
+$('#add-alarm').addEventListener('click', () => {
+  $('#alarm-form').classList.remove('hidden');
+  $('#add-alarm').classList.add('hidden');
+  $('#a-time').focus();
+});
+$('#a-cancel').addEventListener('click', () => {
+  $('#alarm-form').classList.add('hidden');
+  $('#add-alarm').classList.remove('hidden');
+});
+$$('#a-days button').forEach(b => b.addEventListener('click', () => b.classList.toggle('on')));
+
+// source picker toggles which extra fields show
+function syncAlarmFields() {
+  const s = $('#a-source').value;
+  $('#a-path-wrap').classList.toggle('hidden', !(s === 'file' || s === 'shuffle'));
+  $('#a-vol-wrap').classList.toggle('hidden', s !== 'appletv_music');
+  const pathLabel = $('#a-path-wrap');
+  if (pathLabel && !pathLabel.classList.contains('hidden')) {
+    pathLabel.childNodes[0].nodeValue = s === 'shuffle'
+      ? 'Shuffle within folder (blank = whole library) ' : 'Library path (server file) ';
+  }
+}
+$('#a-source').addEventListener('change', syncAlarmFields);
+syncAlarmFields();
+
+$('#alarm-form').addEventListener('submit', async event => {
+  event.preventDefault();
+  const source = $('#a-source').value;
+  const volRaw = $('#a-volume').value.trim();
+  const body = {
+    time: $('#a-time').value,
+    label: $('#a-label').value.trim() || 'Alarm',
+    days: $$('#a-days button.on').map(b => Number(b.dataset.day)),
+    source,
+    url: '',
+    path: (source === 'file' || source === 'shuffle') ? $('#a-path').value.trim() : '',
+    volume: volRaw === '' ? null : Number(volRaw),
+  };
+  if (!body.time) { toast('Pick a time'); return; }
+  if (source === 'file' && !body.path) { toast('Enter a library path'); return; }
+  const result = await api('POST', '/api/alarms', body);
+  if (!result.ok) { toast(result.data?.error || 'Could not save alarm'); return; }
+  toast('Alarm saved');
+  $('#alarm-form').reset();
+  $$('#a-days button.on').forEach(b => b.classList.remove('on'));
+  syncAlarmFields();
+  $('#alarm-form').classList.add('hidden');
+  $('#add-alarm').classList.remove('hidden');
+  loadAlarms();
+});
+
+/* --- Watch on the Pi --- */
+function setWatchActive(kind) {
+  $$('[data-watch]').forEach(b => b.classList.toggle('active', b.dataset.watch === kind));
+}
+function showLibrary(show) {
+  $('#library-controls').classList.toggle('hidden', !show);
+  if (show && !mediaLoaded) loadMedia('');
+}
+$('#w-live').addEventListener('click', async () => {
+  setWatchActive('livestream');
+  showLibrary(false);
+  toast('Starting livestream on the TV…');
+  const r = await api('POST', '/api/screen/livestream');
+  if (!r.ok) toast(r.data?.detail || r.data?.error || 'Livestream unavailable');
+});
+$('#w-library').addEventListener('click', async () => {
+  setWatchActive('library');
+  showLibrary(true);
+});
+$('#w-shuffle').addEventListener('click', async () => {
+  setWatchActive('library');
+  showLibrary(true);
+  toast('Shuffling your library…');
+  const r = await api('POST', '/api/media/shuffle', { path: mediaPath });
+  if (!r.ok) toast(r.data?.error || 'Nothing to shuffle');
+});
+$('#w-dash').addEventListener('click', async () => {
+  setWatchActive('dashboard');
+  showLibrary(false);
+  toast('Back to the dashboard');
+  await api('POST', '/api/screen/stop');
+  await api('POST', '/api/input/pi');
+  await refreshInput();
+});
+/* --- TV input switcher (with active highlight) --- */
+async function switchInput(kind, button) {
+  const label = kind === 'appletv' ? 'Apple TV' : 'Pi';
+  toast('Switching to ' + label);
+  setBusy(button, true);
+  const r = await api('POST', '/api/input/' + kind);
+  setBusy(button, false);
+  if (!r.ok) toast(r.data?.error || 'Input switch failed');
+  return refreshInput();
+}
+$('#in-atv').addEventListener('click', event => switchInput('appletv', event.currentTarget));
+$('#in-pi').addEventListener('click', event => switchInput('pi', event.currentTarget));
+
+async function refreshInput() {
+  const r = await api('GET', '/api/input/status');
+  const active = r.ok ? (r.data?.active || 'pi') : null;
+  $$('#input-seg button').forEach(b => b.classList.toggle('active', b.dataset.input === active));
+  return active;
+}
+
+/* --- transport (Pi mpv) --- */
+async function screenControl(action, secs) {
+  return api('POST', '/api/screen/control', secs != null ? { action, secs } : { action });
+}
+function fmtT(s) {
+  s = Math.max(0, Math.floor(s || 0));
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), ss = s % 60;
+  const p = n => String(n).padStart(2, '0');
+  return h ? (h + ':' + p(m) + ':' + p(ss)) : (m + ':' + p(ss));
+}
+function showTransport(kind) {  // '', 'media', 'live'
+  const media = kind === 'media', live = kind === 'live';
+  $('#np-progress').classList.toggle('hidden', !media);
+  $('#np-times').classList.toggle('hidden', !media);
+  $('#transport').classList.toggle('hidden', !media);          // seek + pause: media only
+  $('#transport2').classList.toggle('hidden', !(media || live)); // stop row: any playback
+  $('#np-cc').classList.toggle('hidden', !media);              // subtitles: media only
+}
+$$('#transport [data-seek]').forEach(b => b.addEventListener('click', () => screenControl('seek', Number(b.dataset.seek))));
+$('#pp').addEventListener('click', async () => { await screenControl('pause'); setTimeout(refresh, 200); });
+$('#np-stop').addEventListener('click', async () => { toast('Stopping'); await api('POST', '/api/screen/stop'); await api('POST', '/api/jetstream/stop'); });
+$('#np-cc').addEventListener('click', async () => { toast('Subtitles: cycling'); await api('POST', '/api/media/subtitles'); });
+
+/* --- media library (SMB share) --- */
+let mediaLoaded = false, mediaPath = '';
+function mediaRow(label, kind, onClick) {
+  const row = document.createElement('div');
+  row.className = 'music-row';
+  row.innerHTML = '<div class="m-title">' + esc(label) + '</div>';
+  const b = document.createElement('button');
+  b.textContent = kind === 'file' ? 'Play' : (kind === 'back' ? 'Up' : 'Open');
+  if (kind !== 'file') b.style.background = 'var(--surface-3)';
+  b.onclick = onClick;
+  row.appendChild(b);
+  if (kind !== 'file') { row.style.cursor = 'pointer'; row.onclick = onClick; }
+  return row;
+}
+async function loadMedia(path) {
+  const node = $('#media-list');
+  node.innerHTML = '<span class="muted">Loading…</span>';
+  const r = await api('GET', '/api/media/list?path=' + encodeURIComponent(path || ''));
+  node.innerHTML = '';
+  mediaPath = path || '';
+  if (!r.ok) { node.innerHTML = '<span class="muted">' + esc(r.data?.error || 'unavailable') + '</span>'; return; }
+  if (path) {
+    const parent = path.split('/').slice(0, -1).join('/');
+    node.appendChild(mediaRow('⬅ Back', 'back', () => loadMedia(parent)));
+  }
+  (r.data.entries || []).forEach(e => {
+    if (e.type === 'dir') {
+      node.appendChild(mediaRow('📁 ' + e.name, 'dir', () => loadMedia(e.path)));
+    } else {
+      node.appendChild(mediaRow('🎬 ' + e.name, 'file', async () => {
+        toast('Playing ' + e.name);
+        const x = await api('POST', '/api/media/play', { path: e.path });
+        if (!x.ok) toast(x.data?.error || 'play failed');
+      }));
+    }
+  });
+  mediaLoaded = true;
+}
+
+/* --- device state --- */
+async function refreshTvState() {
+  const result = await api('GET', '/api/cec/status');
+  if (!result.ok) {
+    $('#tv-status').textContent = 'TV state unavailable';
+    return;
+  }
+  const power = result.data?.tv_power || 'unknown';
+  const adapter = result.data?.adapter ? 'adapter online' : (result.data?.error ? 'CEC timed out' : 'no adapter');
+  $('#tv-status').textContent = 'TV ' + power + ', ' + adapter;
+}
+
+async function refresh() {
+  const status = await api('GET', '/api/atv/status');
+  if (!status.ok) {
+    $('#np-eyebrow').textContent = 'Now Playing';
+    $('#np-title').textContent = 'Apple TV service unavailable';
+    $('#np-sub').textContent = status.data?.error || '';
+    setStatus('bad', 'Service offline');
+    $('#pair').classList.add('hidden');
+    $('#controls').classList.add('hidden');
+    return;
+  }
+  const info = status.data || {};
+  $('#dev').textContent = info.name || 'Living Room';
+
+  if (!info.paired) {
+    $('#pair').classList.remove('hidden');
+    $('#controls').classList.add('hidden');
+    $('#np-title').textContent = info.reachable ? 'Apple TV needs pairing' : 'Apple TV is asleep or unreachable';
+    $('#np-sub').textContent = '';
+    setStatus(info.reachable ? '' : 'bad', info.reachable ? 'Setup needed' : 'Unreachable');
+    return;
+  }
+
+  $('#pair').classList.add('hidden');
+  $('#controls').classList.remove('hidden');
+  setStatus(info.connected ? 'ok' : '', info.connected ? 'Connected' : 'Reachable');
+
+  loadAlarms();
+  const activeInput = await refreshInput();
+
+  // Now playing: video plays on the Pi's HDMI, so show THAT first.
+  const screen = await api('GET', '/api/screen/status');
+  const sd = screen.ok ? (screen.data || {}) : {};
+  const screenPlaying = !!(sd.playing && sd.url);
+  if (window._wasScreenPlaying && !screenPlaying) api('POST', '/api/screen/stop');
+  window._wasScreenPlaying = screenPlaying;
+
+  if (screenPlaying) {
+    const u = decodeURIComponent(sd.url);
+    const isLive = sd.profile === 'live' || /\.m3u8|live\.thelunadog/i.test(u);
+    if (isLive) {
+      setWatchActive('livestream');
+      showLibrary(false);
+      $('#np-eyebrow').innerHTML = '<span class="live-badge">● LIVE</span>';
+      $('#np-title').textContent = sd.title || 'Jetstream livestream';
+      $('#np-sub').textContent = sd.subtitle || 'On the TV (Pi)';
+      showTransport('live');
+    } else {
+      setWatchActive('library');
+      showLibrary(true);
+      const parts = u.split('/').filter(Boolean);
+      const file = parts.pop() || u;
+      const folder = parts.pop() || '';
+      $('#np-eyebrow').textContent = 'Now Playing';
+      $('#np-title').textContent = sd.title || folder || file.replace(/\.[^.]+$/, '');
+      $('#np-sub').textContent = sd.subtitle || 'On the TV (Pi)';
+      showTransport('media');
+      if (sd.duration) {
+        $('#np-bar').style.width = Math.min(100, 100 * (sd.position || 0) / sd.duration) + '%';
+        $('#np-pos').textContent = fmtT(sd.position);
+        $('#np-dur').textContent = fmtT(sd.duration);
+      } else {
+        $('#np-bar').style.width = '0%';
+        $('#np-pos').textContent = fmtT(sd.position);
+        $('#np-dur').textContent = '—';
+      }
+      $('#pp').textContent = sd.paused ? '▶ Play' : '⏸ Pause';
+    }
+    return;
+  }
+
+  // Nothing on the Pi means the idle dashboard is showing unless Apple TV is
+  // the active input. Do not label background Apple TV music as TV playback.
+  setWatchActive('dashboard');
+  showLibrary(false);
+  showTransport('');
+  const state = activeInput === 'appletv' ? await api('GET', '/api/atv/state') : { ok: false };
+  if (state.ok && state.data?.title) {
+    $('#np-eyebrow').textContent = 'Now Playing';
+    $('#np-title').textContent = state.data.title;
+    $('#np-sub').textContent = state.data.subtitle || [state.data.artist, state.data.app].filter(Boolean).join(' · ');
+  } else {
+    $('#np-eyebrow').textContent = 'Dashboard';
+    $('#np-title').textContent = 'Dashboard';
+    $('#np-sub').textContent = 'Idle — showing the living-room dashboard';
+  }
+}
+
+refresh();
+refreshTvState();
+setInterval(refresh, 4000);
+setInterval(refreshTvState, 10000);
+</script>
+</body>
+</html>

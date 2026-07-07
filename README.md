@@ -1,0 +1,77 @@
+# livingroom-pi
+
+Self-contained living-room controller that runs **entirely on a Raspberry Pi 5**
+wired to the TV. No homelab / Traefik dependency — if the homelab is down, the
+living room still works.
+
+Three services, all host-networked:
+
+| Service | Port | What it does |
+|---|---|---|
+| `hub` | 8080 | The app you use — unified web UI + API proxy + scene engine + alarm scheduler + Plex/screen-player control. Front door for everything below. |
+| `appletv` | 8010 | Control the Apple TV over pyatv (Companion): remote buttons, now-playing, **list/launch apps**, power, AirPlay stream, volume. Web remote at `/`. |
+| `cec` | 8020 | Control the **TV set** over HDMI-CEC: power, volume, input/source switching. |
+
+## Features
+
+- **Unified remote** — D-pad, buttons, app launcher, now-playing, and TV controls
+  from one phone-friendly web UI (`hub` on :8080).
+- **Apple TV control** (Companion) — remote commands, list/launch apps, power,
+  volume, and now-playing state.
+- **TV-set control** (HDMI-CEC) — power on/off, volume, and active-source handoff
+  so the Pi grabs the input.
+- **Scenes** — one tap runs a CEC + Apple TV sequence: **Movie Night** (TV on →
+  Apple TV on → launch Plex), **YouTube**, **Everything Off**. Data-driven via
+  `data/hub/scenes.json`.
+- **Music alarms** — scheduled wake that turns the TV on and plays music, from any
+  of five sources: Apple Music/app over Companion, AirPlay stream to the Apple TV,
+  or the Pi's own livestream / file / shuffle player. Set/edit/toggle/test from the
+  UI; persists to `data/hub/alarms.json`.
+- **Plex** — browse libraries, playlists, and search; play tracks/playlists.
+- **Pi-side screen player** — mpv-based local playback (livestream / file / shuffle)
+  with an on-TV cage kiosk dashboard.
+- **Off-homelab** — runs entirely on the Pi; survives homelab reboots.
+
+## Deploy to the Pi
+
+```sh
+# from this machine, once the Pi is on the LAN:
+rsync -a --exclude .env --exclude data/ ~/livingroom-pi/ livingroom-pi:~/livingroom-pi/
+
+# on the Pi:
+cd ~/livingroom-pi
+cp .env.example .env && $EDITOR .env      # set ATV_ADDRESS
+docker compose up -d --build
+```
+
+## Apple TV pairing (one-time)
+
+Companion needs a one-time PIN pairing (shown on the TV). Credentials persist to
+`data/appletv/pyatv.conf`.
+
+```sh
+docker exec -it appletv \
+  atvremote --scan-hosts "$ATV_ADDRESS" \
+            --storage-filename /data/pyatv.conf \
+            --protocol companion pair
+```
+
+## Apps on the Apple TV
+
+```sh
+curl -s  http://<pi>:8010/api/apps                     # list installed apps + bundle ids
+curl -sX POST http://<pi>:8010/api/launch/com.netflix.Netflix
+```
+
+## CEC quick test
+
+```sh
+curl -s  http://<pi>:8020/api/status                   # adapter present? TV power? bus devices
+curl -sX POST http://<pi>:8020/api/tv/on
+curl -sX POST http://<pi>:8020/api/tv/volume/up
+```
+
+If `/api/status` reports no adapter: confirm `/dev/cec0` exists on the Pi
+(`ls /dev/cec*`), that the TV's CEC is enabled (Anynet+/Bravia Sync/SimpLink/…),
+and that the Pi is on an HDMI input the TV can see.
+```
