@@ -1,0 +1,113 @@
+#!/usr/bin/env python3
+"""Ambient aerial screensaver for the Pi's HDMI.
+
+mpv plays the locally-cached Apple aerials (hardware-decoded via the Pi 5 codec)
+straight to DRM/KMS, and the dashboard is composited ON TOP as a transparent
+overlay. chromium/cage can't paint HTML5 <video> here (software or GPU — a
+Wayland video-surface limitation), so instead of a <video> in the page we render
+the dashboard to a transparent PNG with headless chromium and hand it to mpv via
+`overlay-add`, refreshed once a minute (the clock's seconds are hidden in overlay
+mode). One process owns DRM; no compositor / chromium-transparency gamble.
+
+Run it in place of the cage dashboard kiosk (see aerial-screen.service). Stop it
+the same way the screen player stops the kiosk (both want DRM master).
+"""
+from __future__ import annotations
+
+import glob
+import json
+import os
+import signal
+import socket
+import subprocess
+import sys
+import time
+
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+AERIAL_DIR = os.environ.get("AERIAL_DIR", os.path.join(REPO, "data/hub/aerials"))
+DASH_URL = os.environ.get(
+    "AERIAL_DASH_URL", "http://localhost:8080/dashboard?host=pi5&overlay=1")
+DRM_MODE = os.environ.get("SCREEN_DRM_MODE", "6")   # 6 = 1920x1080@60 on this TV
+IPC = os.environ.get("AERIAL_IPC", "/tmp/mpv-aerial-mode")
+REFRESH = int(os.environ.get("AERIAL_REFRESH", "60"))   # overlay redraw cadence (s)
+W, H = 1920, 1080
+PNG, RAW = "/tmp/aerial-ov.png", "/tmp/aerial-ov.bgra"
+
+_mpv: subprocess.Popen | None = None
+
+
+def _stop(*_):
+    if _mpv and _mpv.poll() is None:
+        _mpv.terminate()
+    sys.exit(0)
+
+
+def _connect_ipc(timeout: float = 20.0):
+    end = time.time() + timeout
+    while time.time() < end:
+        if os.path.exists(IPC):
+            try:
+                s = socket.socket(socket.AF_UNIX)
+                s.connect(IPC)
+                return s
+            except OSError:
+                pass
+        time.sleep(0.5)
+    return None
+
+
+def _render_overlay() -> bool:
+    """Dashboard(overlay) -> transparent PNG -> raw BGRA that mpv can overlay."""
+    r = subprocess.run(
+        ["chromium", "--headless=new", "--no-sandbox", "--disable-gpu",
+         "--hide-scrollbars", "--default-background-color=00000000",
+         f"--window-size={W},{H}", "--virtual-time-budget=4000",
+         f"--screenshot={PNG}", DASH_URL],
+        capture_output=True)
+    if r.returncode != 0 or not os.path.exists(PNG):
+        return False
+    r = subprocess.run(
+        ["ffmpeg", "-y", "-loglevel", "error", "-i", PNG,
+         "-f", "rawvideo", "-pix_fmt", "bgra", RAW],
+        capture_output=True)
+    return r.returncode == 0
+
+
+def main() -> None:
+    global _mpv
+    signal.signal(signal.SIGTERM, _stop)
+    signal.signal(signal.SIGINT, _stop)
+
+    clips = sorted(glob.glob(os.path.join(AERIAL_DIR, "*.mp4")))
+    if not clips:
+        sys.exit(f"aerial-mode: no cached clips in {AERIAL_DIR} "
+                 f"(run screen/fetch-aerials.sh first)")
+    playlist = "/tmp/aerials.m3u"
+    with open(playlist, "w") as fh:
+        fh.write("\n".join(clips) + "\n")
+
+    _mpv = subprocess.Popen(
+        ["mpv", "--vo=drm", f"--drm-mode={DRM_MODE}", "--hwdec=v4l2m2m",
+         "--loop-playlist=inf", "--shuffle", "--no-audio", "--no-config",
+         f"--input-ipc-server={IPC}", "--force-window=yes", "--really-quiet",
+         f"--playlist={playlist}"])
+
+    sock = _connect_ipc()
+    if sock is None:
+        _stop()
+
+    while _mpv.poll() is None:
+        if _render_overlay():
+            try:
+                sock.sendall(json.dumps(
+                    {"command": ["overlay-add", 0, 0, 0, RAW, 0, "bgra",
+                                 W, H, W * 4]}).encode() + b"\n")
+                sock.recv(600)
+            except OSError:
+                sock = _connect_ipc(5) or sock
+        time.sleep(REFRESH)
+    _stop()
+
+
+if __name__ == "__main__":
+    main()

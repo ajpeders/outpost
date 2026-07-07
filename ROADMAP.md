@@ -48,12 +48,17 @@ the TV set (CEC), hosts the hub app, and runs scheduled automations.
   UI: a picker in the alarm editor. (Plex reachable; music section present, but 0
   playlists defined yet — albums work regardless.)
 
-- **Aerials on the dashboard — blocked in-browser.** Apple's tvOS aerials are
-  cached locally + faststart-remuxed (`screen/fetch-aerials.sh` → hub `/aerials`),
-  but the `--disable-gpu` cage/chromium kiosk decodes `<video>` without painting it
-  (stays black). Real moving aerials need **mpv (Pi-5 hardware decode) behind a
-  transparent chromium overlay via labwc**, not `<video>` in cage. Photos are the
-  working default; opt into the (black) video demo with `?bg=video`.
+- **Aerials on the dashboard** ✅ *(built)* Apple's tvOS aerials play behind the
+  clock/weather. In-browser `<video>` was a dead end — cage/chromium won't paint a
+  video surface even with the GPU on (verified with correct ANGLE/GLES flags), a
+  Wayland limitation, not GPU. So `screen/aerial-mode.py` does it the reliable way:
+  **mpv plays the cached aerials on DRM (Pi-5 hardware decode, `hwdec=v4l2m2m`)** and
+  the dashboard is composited on top as a **transparent overlay** — headless
+  chromium renders `/dashboard?overlay=1` to a PNG, converted to BGRA and pushed via
+  mpv `overlay-add`, refreshed each minute (seconds hidden in overlay mode). Runs as
+  `aerial-screen.service` (alternative to the cage `kiosk-screen`; set
+  `SCREEN_KIOSK_SERVICE=aerial-screen` so the screen player's mpv handoff stops the
+  right one). Clips cached by `screen/fetch-aerials.sh` (`RES=720` to downscale).
 
 ## Dropped
 
