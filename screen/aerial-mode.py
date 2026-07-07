@@ -27,13 +27,14 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 AERIAL_DIR = os.environ.get("AERIAL_DIR", os.path.join(REPO, "data/hub/aerials"))
 DASH_URL = os.environ.get(
     "AERIAL_DASH_URL", "http://localhost:8080/dashboard?host=pi5&overlay=1")
-DRM_MODE = os.environ.get("AERIAL_DRM_MODE", "6")   # 6 = 1920x1080@60; the TV upscales to 4K
+DRM_MODE = os.environ.get("AERIAL_DRM_MODE", "3")   # 3 = 3840x2160@29.97 (matches the 30fps clips)
 IPC = os.environ.get("AERIAL_IPC", "/tmp/mpv-aerial-mode")
 REFRESH = int(os.environ.get("AERIAL_REFRESH", "60"))   # overlay redraw cadence (s)
-# 1080p output: the V3D GPU can't scan out 4K@30 via GL (drops 20-70% of frames,
-# GPU-bound even though decode is cheap). 1080p is perfectly smooth (0 drops) and
-# the TV hardware-upscales to its 4K panel. So we cache 1080p H.264 clips.
-W, H = 1920, 1080
+# Native 4K. The V3D scans out 4K@30 smoothly (0 dropped frames, ~14% CPU) — but
+# ONLY with --profile=fast + --video-sync=display-resample on the mpv line below.
+# The DEFAULT GL processing/vsync path drops 20-70% of frames at 4K (visibly
+# choppy). Clips are 4K HEVC (url-4K-SDR); overlay rendered + composited at 4K.
+W, H = 3840, 2160
 PNG, RAW = "/tmp/aerial-ov.png", "/tmp/aerial-ov.bgra"
 
 _mpv: subprocess.Popen | None = None
@@ -96,16 +97,17 @@ def main() -> None:
     with open(playlist, "w") as fh:
         fh.write("\n".join(clips) + "\n")
 
-    # --vo=gpu --gpu-context=drm --hwdec=auto: hardware decode + GL/KMS scanout, 0
-    # dropped frames at 1080p. NOTE: use --vo=gpu, NOT gpu-next (gpu-next scans out
-    # solid PURPLE on this V3D — renders internally but the frame never reaches the
-    # output). Plain --vo=drm also works but uses a copy path. (AERIAL_VO overrides.)
+    # --vo=gpu (NOT gpu-next — that scans out solid PURPLE on this V3D) with zero-copy
+    # --hwdec=drm. --profile=fast + --video-sync=display-resample are REQUIRED for
+    # smooth 4K: without them the V3D drops 20-70% of frames; with them it's 0 drops
+    # at ~14% CPU. --gpu-context=drm scans out straight to KMS (no compositor).
     vo = os.environ.get("AERIAL_VO", "gpu")
     _mpv = subprocess.Popen(
         ["mpv", f"--vo={vo}", "--gpu-context=drm", f"--drm-mode={DRM_MODE}",
-         "--hwdec=auto", "--loop-playlist=inf", "--shuffle", "--no-audio",
-         "--no-config", f"--input-ipc-server={IPC}", "--force-window=yes",
-         "--really-quiet", f"--playlist={playlist}"])
+         "--hwdec=drm", "--profile=fast", "--video-sync=display-resample",
+         "--loop-playlist=inf", "--shuffle", "--no-audio", "--no-config",
+         f"--input-ipc-server={IPC}", "--force-window=yes", "--really-quiet",
+         f"--playlist={playlist}"])
 
     sock = _connect_ipc()
     if sock is None:
