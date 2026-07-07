@@ -27,10 +27,13 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 AERIAL_DIR = os.environ.get("AERIAL_DIR", os.path.join(REPO, "data/hub/aerials"))
 DASH_URL = os.environ.get(
     "AERIAL_DASH_URL", "http://localhost:8080/dashboard?host=pi5&overlay=1")
-DRM_MODE = os.environ.get("AERIAL_DRM_MODE", "3")   # 3 = 3840x2160@29.97 (matches the 30fps clips)
+DRM_MODE = os.environ.get("AERIAL_DRM_MODE", "6")   # 6 = 1920x1080@60; the TV upscales to 4K
 IPC = os.environ.get("AERIAL_IPC", "/tmp/mpv-aerial-mode")
 REFRESH = int(os.environ.get("AERIAL_REFRESH", "60"))   # overlay redraw cadence (s)
-W, H = 3840, 2160   # native 4K; clips are 4K HEVC, dashboard overlay rendered at 4K
+# 1080p output: the V3D GPU can't scan out 4K@30 via GL (drops 20-70% of frames,
+# GPU-bound even though decode is cheap). 1080p is perfectly smooth (0 drops) and
+# the TV hardware-upscales to its 4K panel. So we cache 1080p H.264 clips.
+W, H = 1920, 1080
 PNG, RAW = "/tmp/aerial-ov.png", "/tmp/aerial-ov.bgra"
 
 _mpv: subprocess.Popen | None = None
@@ -93,11 +96,10 @@ def main() -> None:
     with open(playlist, "w") as fh:
         fh.write("\n".join(clips) + "\n")
 
-    # --vo=gpu --gpu-context=drm --hwdec=auto: the V3D GPU imports the Pi-5 HEVC
-    # decoder's frames zero-copy and scans them out via GL/KMS — native 4K at ~19%
-    # CPU, smooth. NOTE: use --vo=gpu, NOT gpu-next: gpu-next renders internally but
-    # scans out solid PURPLE on this V3D. Plain --vo=drm displays but drm-copy can't
-    # sustain 4K (frozen). (AERIAL_VO overrides.)
+    # --vo=gpu --gpu-context=drm --hwdec=auto: hardware decode + GL/KMS scanout, 0
+    # dropped frames at 1080p. NOTE: use --vo=gpu, NOT gpu-next (gpu-next scans out
+    # solid PURPLE on this V3D — renders internally but the frame never reaches the
+    # output). Plain --vo=drm also works but uses a copy path. (AERIAL_VO overrides.)
     vo = os.environ.get("AERIAL_VO", "gpu")
     _mpv = subprocess.Popen(
         ["mpv", f"--vo={vo}", "--gpu-context=drm", f"--drm-mode={DRM_MODE}",
