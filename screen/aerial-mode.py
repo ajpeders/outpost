@@ -27,10 +27,10 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 AERIAL_DIR = os.environ.get("AERIAL_DIR", os.path.join(REPO, "data/hub/aerials"))
 DASH_URL = os.environ.get(
     "AERIAL_DASH_URL", "http://localhost:8080/dashboard?host=pi5&overlay=1")
-DRM_MODE = os.environ.get("SCREEN_DRM_MODE", "6")   # 6 = 1920x1080@60 on this TV
+DRM_MODE = os.environ.get("AERIAL_DRM_MODE", "3")   # 3 = 3840x2160@29.97 (matches the 30fps clips)
 IPC = os.environ.get("AERIAL_IPC", "/tmp/mpv-aerial-mode")
 REFRESH = int(os.environ.get("AERIAL_REFRESH", "60"))   # overlay redraw cadence (s)
-W, H = 1920, 1080
+W, H = 3840, 2160   # native 4K; clips are 4K HEVC, dashboard overlay rendered at 4K
 PNG, RAW = "/tmp/aerial-ov.png", "/tmp/aerial-ov.bgra"
 
 _mpv: subprocess.Popen | None = None
@@ -93,11 +93,14 @@ def main() -> None:
     with open(playlist, "w") as fh:
         fh.write("\n".join(clips) + "\n")
 
+    # --vo=gpu-next + --hwdec=auto = zero-copy Pi-5 HEVC decode (the V3D GPU imports
+    # the decoder's DRM-PRIME frames): ~15% CPU at 4K, no dropped frames. Plain
+    # --vo=drm forces drm-copy (frames copied to RAM) which burns ~2.3 cores.
     _mpv = subprocess.Popen(
-        ["mpv", "--vo=drm", f"--drm-mode={DRM_MODE}", "--hwdec=v4l2m2m",
-         "--loop-playlist=inf", "--shuffle", "--no-audio", "--no-config",
-         f"--input-ipc-server={IPC}", "--force-window=yes", "--really-quiet",
-         f"--playlist={playlist}"])
+        ["mpv", "--vo=gpu-next", "--gpu-context=drm", f"--drm-mode={DRM_MODE}",
+         "--hwdec=auto", "--loop-playlist=inf", "--shuffle", "--no-audio",
+         "--no-config", f"--input-ipc-server={IPC}", "--force-window=yes",
+         "--really-quiet", f"--playlist={playlist}"])
 
     sock = _connect_ipc()
     if sock is None:
