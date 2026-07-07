@@ -240,11 +240,13 @@
           <div class="panel-note">Pi HDMI · HDR10</div>
         </div>
         <div class="panel-body">
-          <div class="tv-grid" style="grid-template-columns:repeat(3,minmax(0,1fr))">
+          <div class="tv-grid" style="grid-template-columns:repeat(2,minmax(0,1fr))">
             <button id="w-live" class="secondary" data-watch="livestream">▶ Livestream</button>
             <button id="w-library" class="secondary" data-watch="library">▦ Library</button>
             <button id="w-dash" class="secondary" data-watch="dashboard">🖥 Dashboard</button>
+            <button id="w-appletv" class="secondary" data-watch="appletv">📺 Apple TV</button>
           </div>
+          <button id="w-music" class="secondary" style="width:100%;margin-top:8px">🎵 Play Apple Music (Apple TV)</button>
           <div id="library-controls" class="hidden">
             <div class="music-results" id="media-list" style="margin-top:10px"><span class="muted">Loading…</span></div>
             <button id="w-shuffle" class="secondary music-stop">🔀 Shuffle library</button>
@@ -259,9 +261,11 @@
           <div class="panel-note" id="tv-status">Checking CEC</div>
         </div>
         <div class="panel-body">
-          <div class="tv-grid seg" id="input-seg" style="grid-template-columns:repeat(2,minmax(0,1fr));margin-bottom:8px">
-            <button id="in-atv" data-input="appletv">📺 Apple TV</button>
-            <button id="in-pi" data-input="pi">🖥 Pi</button>
+          <div class="tv-grid seg" id="input-seg" style="grid-template-columns:repeat(4,minmax(0,1fr));margin-bottom:8px">
+            <button data-hdmi="1">HDMI 1</button>
+            <button data-hdmi="2">HDMI 2</button>
+            <button data-hdmi="3">HDMI 3</button>
+            <button data-hdmi="4">HDMI 4</button>
           </div>
           <div class="tv-grid">
             <button data-cec="/tv/on">On</button>
@@ -635,23 +639,38 @@ $('#w-dash').addEventListener('click', async () => {
   await api('POST', '/api/input/pi');
   await refreshInput();
 });
+$('#w-appletv').addEventListener('click', async () => {
+  setWatchActive('appletv'); showLibrary(false);
+  toast('Switching to the Apple TV');
+  await api('POST', '/api/input/appletv');
+  await refreshInput();
+});
+$('#w-music').addEventListener('click', async () => {
+  const b = $('#w-music'), t = b.textContent; b.disabled = true; b.textContent = 'Starting…';
+  toast('Starting Apple Music on the Apple TV…');
+  try {
+    const r = await api('POST', '/api/apple-music');
+    toast(r && r.ok ? '✓ Apple Music playing' : '✗ ' + (r?.data?.error || 'failed'));
+  } catch (e) { toast('✗ ' + (e.message || e)); }
+  finally { b.disabled = false; b.textContent = t; }
+});
 /* --- TV input switcher (with active highlight) --- */
-async function switchInput(kind, button) {
-  const label = kind === 'appletv' ? 'Apple TV' : 'Pi';
-  toast('Switching to ' + label);
+/* --- raw HDMI input switcher (CEC set-stream-path) --- */
+async function switchHdmi(n, button) {
+  toast('Switching to HDMI ' + n);
   setBusy(button, true);
-  const r = await api('POST', '/api/input/' + kind);
+  const r = await api('POST', '/api/tv/input/' + n);
   setBusy(button, false);
   if (!r.ok) toast(r.data?.error || 'Input switch failed');
-  return refreshInput();
+  await refreshInput();
 }
-$('#in-atv').addEventListener('click', event => switchInput('appletv', event.currentTarget));
-$('#in-pi').addEventListener('click', event => switchInput('pi', event.currentTarget));
+$$('[data-hdmi]').forEach(b => b.addEventListener('click', e => switchHdmi(b.dataset.hdmi, e.currentTarget)));
 
 async function refreshInput() {
   const r = await api('GET', '/api/input/status');
   const active = r.ok ? (r.data?.active || 'pi') : null;
-  $$('#input-seg button').forEach(b => b.classList.toggle('active', b.dataset.input === active));
+  // the Pi sits on HDMI 1 — highlight it when the Pi is the active source
+  $$('#input-seg button').forEach(b => b.classList.toggle('active', active === 'pi' && b.dataset.hdmi === '1'));
   return active;
 }
 

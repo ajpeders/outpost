@@ -41,6 +41,7 @@ CURSOR_INSTALL = os.environ.get(
 # steals the input when it wakes; this switches the TV back to the dashboard.
 TV_RECLAIM = os.environ.get(
     "SCREEN_TV_RECLAIM", "/home/alex/livingroom-pi/screen/tv-reclaim.sh")
+CEC_DEV = os.environ.get("SCREEN_CEC_DEV", "/dev/cec0")
 
 
 def _kiosk(action: str) -> None:
@@ -80,6 +81,25 @@ def _tv_reclaim() -> dict:
     r = subprocess.run(["bash", TV_RECLAIM],
                        capture_output=True, text=True, check=False)
     return {"ok": r.returncode == 0, "output": (r.stdout or r.stderr).strip()}
+
+
+def _tv_input(n: int) -> dict:
+    """Switch the TV to HDMI input n via CEC (Set Stream Path to phys addr n.0.0.0).
+
+    Register as a playback device first (the shared /dev/cec0 gets reset to
+    "unregistered" by status polling, and an unregistered device's messages are
+    ignored), wake the TV, then request the route. Works for whatever device is
+    on that HDMI port (the TV does the switching)."""
+    pa = f"0x{int(n)}000"
+    subprocess.run(["cec-ctl", "-d", CEC_DEV, "--playback"],
+                   capture_output=True, check=False)
+    subprocess.run(["cec-ctl", "-d", CEC_DEV, "--to", "0", "--image-view-on"],
+                   capture_output=True, check=False)
+    r = subprocess.run(
+        ["cec-ctl", "-d", CEC_DEV, "--to", "0", "--set-stream-path",
+         f"phys-addr={pa}"], capture_output=True, text=True, check=False)
+    return {"ok": r.returncode == 0, "input": int(n),
+            "output": (r.stdout or r.stderr).strip()[:200]}
 
 PORT = int(os.environ.get("SCREEN_PORT", "9595"))
 # SMB-mounted media library (direct file play — no transcode)
@@ -457,6 +477,15 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200 if result["ok"] else 500, result)
         elif self.path == "/tv/reclaim":
             result = _tv_reclaim()
+            self._send(200 if result["ok"] else 500, result)
+        elif self.path == "/tv/input":
+            try:
+                n = int(body.get("n", 0))
+            except (TypeError, ValueError):
+                n = 0
+            if not 1 <= n <= 9:
+                return self._send(400, {"error": "n must be 1-9"})
+            result = _tv_input(n)
             self._send(200 if result["ok"] else 500, result)
         elif self.path == "/control":
             action = str(body.get("action", ""))

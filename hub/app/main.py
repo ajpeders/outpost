@@ -532,6 +532,33 @@ async def input_pi():
     return {"ok": True, "input": "pi"}
 
 
+@app.post("/api/apple-music")
+async def apple_music():
+    """One-tap: wake the Apple TV and start Apple Music (same sequence as the
+    appletv_music alarm). CEC turns the TV on → power_on resumes the last session
+    → launch Music → play (idempotent, always ends Playing)."""
+    global _active_input
+    await client.post(f"{CEC_URL}/api/tv/on")
+    await client.post(f"{ATV_URL}/api/power/on")   # wake + resume last playback
+    await asyncio.sleep(4)                          # let the TV + ATV wake
+    await client.post(f"{ATV_URL}/api/launch/com.apple.TVMusic")
+    await asyncio.sleep(2)
+    await client.post(f"{ATV_URL}/api/command/play")
+    _active_input = "appletv"
+    return {"ok": True, "playing": "apple-music"}
+
+
+@app.post("/api/tv/input/{n}")
+async def tv_input(n: int):
+    """Switch the TV to a raw HDMI input (CEC Set Stream Path via the screen
+    player, which runs cec-ctl on the host)."""
+    try:
+        r = await client.post(f"{SCREEN_URL}/tv/input", json={"n": n})
+    except httpx.RequestError as exc:
+        return JSONResponse(status_code=502, content={"error": f"screen player unreachable: {exc}"})
+    return Response(content=r.content, status_code=r.status_code, media_type="application/json")
+
+
 @app.get("/healthz")
 async def healthz():
     return {"ok": True}
