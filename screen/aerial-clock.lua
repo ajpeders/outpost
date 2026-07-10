@@ -7,7 +7,7 @@
 -- the dashboard's white monospace style. Tune position/size via the AERIAL_SEC_*
 -- env vars without editing this file.
 
-local X  = tonumber(os.getenv("AERIAL_SEC_X")  or "2145")   -- in 3840x2160 space
+local X  = tonumber(os.getenv("AERIAL_SEC_X")  or "2194")   -- 3840x2160 space; center over "PM"
 local Y  = tonumber(os.getenv("AERIAL_SEC_Y")  or "150")
 local FS = tonumber(os.getenv("AERIAL_SEC_FS") or "132")
 
@@ -18,7 +18,7 @@ ov.res_y = 2160
 local function update()
     local s = os.date("*t").sec
     ov.data = string.format(
-        "{\\an7\\pos(%d,%d)\\fnDejaVu Sans Mono\\b1\\fs%d\\c&HFFFFFF&"
+        "{\\an8\\pos(%d,%d)\\fnDejaVu Sans Mono\\b1\\fs%d\\c&HFFFFFF&"
         .. "\\bord0\\shad5\\4c&H000000&\\4a&H40&}:%02d",
         X, Y, FS, s)
     ov:update()
