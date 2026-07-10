@@ -2,3 +2,7 @@
 data/
 __pycache__/
 *.pyc
+
+# runtime artifacts (vision/gstreamer/hailo)
+gstshark_*/
+*.log
