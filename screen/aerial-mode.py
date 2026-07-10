@@ -67,14 +67,25 @@ def _render_overlay() -> bool:
     cache survives between renders — otherwise every render is a cold browser
     that must re-fetch weather (external, slow) within the virtual-time budget,
     and intermittently snapshots before it lands (blank weather/alarm). With the
-    cache warm, the page paints weather immediately on load."""
-    r = subprocess.run(
-        ["chromium", "--headless=new", "--no-sandbox", "--disable-gpu",
-         "--hide-scrollbars", "--default-background-color=00000000",
-         "--user-data-dir=/tmp/aerial-chrome-profile",
-         f"--window-size={W},{H}", "--virtual-time-budget=8000",
-         f"--screenshot={PNG}", DASH_URL],
-        capture_output=True)
+    cache warm, the page paints weather immediately on load.
+
+    A previous render can hang (a killed chromium leaves the profile's Singleton
+    lock, and the next launch deadlocks on it). So: kill any leftover chromium on
+    this profile + drop the lock FIRST, and run with a hard timeout — otherwise a
+    single hung render freezes this loop forever and the clock gets stuck."""
+    subprocess.run(["pkill", "-9", "-f", "aerial-chrome-profile"], check=False)
+    subprocess.run("rm -f /tmp/aerial-chrome-profile/Singleton*", shell=True, check=False)
+    try:
+        r = subprocess.run(
+            ["chromium", "--headless=new", "--no-sandbox", "--disable-gpu",
+             "--hide-scrollbars", "--default-background-color=00000000",
+             "--user-data-dir=/tmp/aerial-chrome-profile", "--no-first-run",
+             f"--window-size={W},{H}", "--virtual-time-budget=8000",
+             f"--screenshot={PNG}", DASH_URL],
+            capture_output=True, timeout=30)
+    except subprocess.TimeoutExpired:
+        subprocess.run(["pkill", "-9", "-f", "aerial-chrome-profile"], check=False)
+        return False
     if r.returncode != 0 or not os.path.exists(PNG):
         return False
     r = subprocess.run(
