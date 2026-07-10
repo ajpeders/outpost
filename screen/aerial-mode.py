@@ -113,9 +113,12 @@ def main() -> None:
     # smooth 4K: without them the V3D drops 20-70% of frames; with them it's 0 drops
     # at ~14% CPU. --gpu-context=drm scans out straight to KMS (no compositor).
     vo = os.environ.get("AERIAL_VO", "gpu")
+    clock_lua = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                             "aerial-clock.lua")   # live ticking seconds (OSD)
     _mpv = subprocess.Popen(
         ["mpv", f"--vo={vo}", "--gpu-context=drm", f"--drm-mode={DRM_MODE}",
          "--hwdec=drm", "--profile=fast", "--video-sync=display-resample",
+         f"--script={clock_lua}",
          "--loop-playlist=inf", "--shuffle", "--no-audio", "--no-config",
          f"--input-ipc-server={IPC}", "--force-window=yes", "--really-quiet",
          f"--playlist={playlist}"])
