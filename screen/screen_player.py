@@ -189,12 +189,16 @@ def _build_args(url: str, headers: dict | None, audio_only: bool,
                 profile: str = "live", mode: str | None = None) -> list[str]:
     m = mode or DRM_MODE
     if profile == "media":
-        # local files are often 4K HEVC 10-bit HDR. The Pi's v3d GPU can't make
-        # a GL framebuffer for HDR (gpu-next fails), so no tone-mapping — output
-        # the mode picked to match the file (native res + matching refresh) via
-        # plain drm + HEVC hardware decode (overlay plane, no GPU), and let the
-        # 4K HDR TV do the HDR itself (passthrough). Bigger buffer for SMB reads.
-        video = ["--vo=drm", f"--drm-mode={m}", "--hwdec=auto",
+        # local files are often 4K HEVC. --vo=drm forces drm-copy (frames copied to
+        # RAM) which drops ~50% of frames at 4K — visibly choppy. --vo=gpu with
+        # zero-copy --hwdec=drm + --profile=fast + display-resample is smooth (the
+        # V3D imports the decoder's frames directly), same fix as the aerials.
+        # NOT gpu-next (scans out purple on this V3D). --target-colorspace-hint
+        # passes HDR metadata through to the TV for HDR files (no-op for SDR).
+        # Bigger buffer for SMB reads.
+        video = ["--vo=gpu", "--gpu-context=drm", f"--drm-mode={m}",
+                 "--hwdec=drm", "--profile=fast", "--video-sync=display-resample",
+                 "--target-colorspace-hint=yes",
                  "--cache=yes", "--cache-secs=15", "--demuxer-readahead-secs=15",
                  # on-demand: load internal + external (.srt) subs, start OFF,
                  # toggle on via the IPC socket (see /sub/cycle).
