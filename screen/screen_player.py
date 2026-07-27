@@ -104,6 +104,15 @@ def _tv_input(n: int) -> dict:
 PORT = int(os.environ.get("SCREEN_PORT", "9595"))
 # SMB-mounted media library (direct file play — no transcode)
 MEDIA_ROOT = os.environ.get("SCREEN_MEDIA_ROOT", "/mnt/share/media")
+_REPO = osp.dirname(osp.dirname(osp.abspath(__file__)))
+# mpv resume points ("continue watching") — written on graceful quit, removed by
+# mpv itself when a file plays to the end.
+WATCH_LATER_DIR = os.environ.get(
+    "SCREEN_WATCH_LATER", osp.join(_REPO, "data", "screen", "watch_later"))
+# recent shuffle picks, so shuffle doesn't repeat until it has to
+SHUFFLE_HISTORY_FILE = os.environ.get(
+    "SCREEN_SHUFFLE_HISTORY", osp.join(_REPO, "data", "screen", "shuffle-history.json"))
+SHUFFLE_NO_REPEAT = int(os.environ.get("SCREEN_SHUFFLE_NO_REPEAT", "20"))
 VIDEO_EXTS = (".mkv", ".mp4", ".avi", ".m4v", ".mov", ".ts", ".webm",
               ".mpg", ".mpeg", ".wmv", ".flv")
 # DRM mode index for the HDMI output. 6 = 1920x1080@60 on this TV; native 1080p
@@ -136,31 +145,38 @@ def _modes() -> list[tuple[int, int, int, float]]:
     return _MODES
 
 
-def _probe(path: str) -> tuple[int, int, float] | None:
-    """(width, height, fps) of a media file via ffprobe, or None."""
+def _probe(path: str) -> tuple[int, int, float, bool] | None:
+    """(width, height, fps, is_hdr) of a media file via ffprobe, or None."""
     if not shutil.which("ffprobe"):
         return None
     try:
         out = subprocess.run(
             ["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
-             "stream=width,height,avg_frame_rate", "-of", "json", path],
+             "stream=width,height,avg_frame_rate,color_transfer", "-of", "json", path],
             capture_output=True, text=True, timeout=20).stdout
         s = json.loads(out)["streams"][0]
         num, den = (s.get("avg_frame_rate") or "0/1").split("/")
         fps = float(num) / float(den) if float(den) else 0.0
-        return int(s.get("width") or 0), int(s.get("height") or 0), fps
+        hdr = (s.get("color_transfer") or "") in ("smpte2084", "arib-std-b67")
+        return int(s.get("width") or 0), int(s.get("height") or 0), fps, hdr
     except Exception:  # noqa: BLE001
         return None
 
 
-def _pick_mode(w: int, h: int, fps: float) -> str:
+def _pick_mode(w: int, h: int, fps: float, hdr: bool = False) -> str:
     """Best DRM mode: native-ish resolution + a refresh that's an integer
-    multiple of the content fps (judder-free). Falls back to DRM_MODE."""
+    multiple of the content fps (judder-free). Falls back to DRM_MODE.
+
+    HDR (PQ/HLG) 4K is output at 1080p: the V3D can composite SDR 4K fine
+    (the aerials) but drops ~1/3 of frames on 10-bit HDR at 4K — measured, the
+    hw decoder and CPU were idle. Quarter the fragments and it keeps up; the
+    TV upscales and still gets the HDR signal (--target-colorspace-hint)."""
     modes = _modes()
     if not modes:
         return DRM_MODE
     fps = fps or 24.0
-    tw, th = (3840, 2160) if (w >= 3000 or h >= 1600) else (1920, 1080)
+    want_4k = (w >= 3000 or h >= 1600) and not hdr
+    tw, th = (3840, 2160) if want_4k else (1920, 1080)
     cands = [m for m in modes if m[1] == tw and m[2] == th] \
         or [m for m in modes if (m[1], m[2]) == (1920, 1080)] or modes
 
@@ -185,6 +201,13 @@ _stopped: bool = True           # True = intentionally stopped (won't relaunch)
 _mode: str = DRM_MODE           # DRM mode index for the current playback
 
 
+def _clean_text(value) -> str | None:
+    text = str(value or "").strip()
+    if not text or text.lower() in {"none", "null", "undefined", "n/a"}:
+        return None
+    return text
+
+
 def _build_args(url: str, headers: dict | None, audio_only: bool,
                 profile: str = "live", mode: str | None = None) -> list[str]:
     m = mode or DRM_MODE
@@ -198,11 +221,22 @@ def _build_args(url: str, headers: dict | None, audio_only: bool,
         # Bigger buffer for SMB reads.
         video = ["--vo=gpu", "--gpu-context=drm", f"--drm-mode={m}",
                  "--hwdec=drm", "--profile=fast", "--video-sync=display-resample",
+                 # 4K HDR/DV 10-bit is too heavy for the V3D's full GL path
+                 # (~8 dropped frames/s); dumb mode skips the scaler/dither
+                 # passes — content plays at native resolution anyway.
+                 "--gpu-dumb-mode",
                  "--target-colorspace-hint=yes",
                  "--cache=yes", "--cache-secs=15", "--demuxer-readahead-secs=15",
                  # on-demand: load internal + external (.srt) subs, start OFF,
                  # toggle on via the IPC socket (see /sub/cycle).
-                 "--sub-auto=fuzzy", "--sid=no", f"--input-ipc-server={IPC_SOCKET}"]
+                 "--sub-auto=fuzzy", "--sid=no", f"--input-ipc-server={IPC_SOCKET}",
+                 # resume support: a graceful quit (see _quit_mpv) saves the
+                 # position; replaying the same file picks it back up. mpv
+                 # deletes the entry itself when a file finishes normally.
+                 "--save-position-on-quit",
+                 f"--watch-later-dir={WATCH_LATER_DIR}",
+                 "--write-filename-in-watch-later-config",
+                 "--watch-later-options=start,sid"]
     else:
         # live HLS (H.264): plain drm VO — robust across the transcode restarts
         # jetstream does on skip (gpu-next "export fails" on relaunch). Pi 5 has
@@ -212,7 +246,11 @@ def _build_args(url: str, headers: dict | None, audio_only: bool,
         # burns its own subs, so don't load a sub track.
         video = ["--vo=drm", f"--drm-mode={m}", "--hwdec=no",
                  "--cache=yes", "--cache-secs=4", "--demuxer-readahead-secs=4",
-                 "--hls-bitrate=max", "--sid=no", "--sub-auto=no"]
+                 "--hls-bitrate=max", "--sid=no", "--sub-auto=no",
+                 # IPC so the supervisor can see video-pts: after a jetstream
+                 # discontinuity mpv can wedge with audio running and video
+                 # frozen — no errors, process alive, only the pts gives it away
+                 f"--input-ipc-server={IPC_SOCKET}"]
     args = ["mpv", *video, "--fullscreen",
             # NO --loop: on a live HLS stream it treats the live edge as EOF and
             # jumps back to the start of the segment window (~30s rewind).
@@ -227,14 +265,28 @@ def _build_args(url: str, headers: dict | None, audio_only: bool,
     return args
 
 
+def _quit_mpv() -> None:
+    """End the current mpv, gracefully when we can. A graceful IPC quit is what
+    lets --save-position-on-quit write the resume point; the pkill afterwards
+    is the belt-and-braces cleanup for anything that didn't listen."""
+    if _proc is not None and _proc.poll() is None and os.path.exists(IPC_SOCKET):
+        _ipc(["quit"])
+        for _ in range(20):
+            if _proc.poll() is not None:
+                break
+            time.sleep(0.1)
+    subprocess.run(["pkill", "-9", "-x", "mpv"], check=False)
+
+
 def _spawn() -> None:
     global _proc
     # Take the display from the idle dashboard (cage/chromium hold DRM master).
     _kiosk("stop")
-    # Hard-kill any existing mpv and WAIT for it (and cage) to fully exit + release
-    # the DRM master before starting a new one. Racing a dying process for the
-    # display is what causes "device busy" / "export failed" -> a black screen.
-    subprocess.run(["pkill", "-9", "-x", "mpv"], check=False)
+    # End any existing mpv (gracefully, so a movie's position is saved) and WAIT
+    # for it (and cage) to fully exit + release the DRM master before starting a
+    # new one. Racing a dying process for the display is what causes "device
+    # busy" / "export failed" -> a black screen.
+    _quit_mpv()
     for _ in range(40):
         if subprocess.run(["pgrep", "-x", "mpv|cage"],
                           stdout=subprocess.DEVNULL).returncode != 0:
@@ -254,6 +306,8 @@ def _play(url: str, headers: dict | None = None, audio_only: bool = False,
           title: str | None = None, subtitle: str | None = None,
           source: str | None = None) -> None:
     global _url, _headers, _audio_only, _stopped, _profile, _supervise, _mode, _title, _subtitle, _source
+    global _corrupt_restarts
+    _corrupt_restarts = 0
     with _lock:
         _url, _headers, _audio_only, _stopped = url, headers, audio_only, False
         _profile, _supervise, _mode = profile, supervise, mode or DRM_MODE
@@ -265,7 +319,7 @@ def _stop() -> None:
     global _url, _stopped, _proc, _title, _subtitle, _source
     with _lock:
         _stopped, _url, _title, _subtitle, _source = True, None, None, None, None
-        subprocess.run(["pkill", "-9", "-x", "mpv"], check=False)
+        _quit_mpv()
         _proc = None
     _kiosk("start")  # back to the idle dashboard
 
@@ -302,30 +356,125 @@ def _media_list(rel: str) -> dict:
     return {"path": rel, "entries": entries}
 
 
+def _pretty_name(real: str, root: str) -> str:
+    """Human title for a library file: prefer the folder name ("Hokum (2026)")
+    over the release-name file stem; for Season folders, show + episode tag."""
+    stem = osp.splitext(osp.basename(real))[0]
+    parent = osp.dirname(real)
+    if osp.realpath(parent) == root:
+        return stem
+    pname = osp.basename(parent)
+    ep = re.search(r"(?i)s\d{1,2}e\d{1,3}", stem)
+    if re.match(r"(?i)(season[ ._-]*\d+|specials)$", pname):
+        show = osp.basename(osp.dirname(parent)) or pname
+        return f"{show} · {ep.group(0).upper() if ep else pname}"
+    return f"{pname} · {ep.group(0).upper()}" if ep else pname
+
+
 def play_media(rel: str, source: str = "media") -> str:
     target = _safe_media_path(rel)
     if not (osp.isfile(target) and target.lower().endswith(VIDEO_EXTS)):
         raise ValueError("not a playable media file")
     info = _probe(target)                       # (w, h, fps) or None
     mode = _pick_mode(*info) if info else DRM_MODE
-    title = osp.splitext(osp.basename(target))[0]
+    title = _pretty_name(target, osp.realpath(MEDIA_ROOT))
     _play(target, profile="media", supervise=False, mode=mode, title=title, source=source)
     return target
 
 
+# Walking the SMB share is a network round-trip per directory — cache the file
+# list per scope so back-to-back shuffles (and alarm-time shuffles) are instant.
+_shuffle_cache: dict[str, tuple[float, list[str]]] = {}
+SHUFFLE_CACHE_TTL = int(os.environ.get("SCREEN_SHUFFLE_TTL", "300"))
+
+
+def _load_shuffle_history() -> list[str]:
+    try:
+        with open(SHUFFLE_HISTORY_FILE) as fh:
+            hist = json.load(fh)
+        return hist if isinstance(hist, list) else []
+    except (OSError, ValueError):
+        return []
+
+
+def _save_shuffle_history(hist: list[str]) -> None:
+    try:
+        os.makedirs(osp.dirname(SHUFFLE_HISTORY_FILE), exist_ok=True)
+        tmp = SHUFFLE_HISTORY_FILE + ".tmp"
+        with open(tmp, "w") as fh:
+            json.dump(hist, fh)
+        os.replace(tmp, SHUFFLE_HISTORY_FILE)
+    except OSError:
+        pass
+
+
 def shuffle_media(rel: str = "") -> str:
-    """Play a random video from the library (optionally scoped to a subfolder)."""
+    """Play a random video from the library (optionally scoped to a subfolder),
+    avoiding the last-N picks so shuffle doesn't repeat until it has to."""
     base = _safe_media_path(rel)
     root = osp.realpath(MEDIA_ROOT)
     walk_base = base if osp.isdir(base) else root
-    files = []
-    for dirpath, _dirs, names in os.walk(walk_base):
-        for n in names:
-            if not n.startswith(".") and n.lower().endswith(VIDEO_EXTS):
-                files.append(osp.relpath(osp.join(dirpath, n), root))
+    cached = _shuffle_cache.get(walk_base)
+    if cached and time.time() - cached[0] < SHUFFLE_CACHE_TTL:
+        files = cached[1]
+    else:
+        files = []
+        for dirpath, _dirs, names in os.walk(walk_base):
+            for n in names:
+                if not n.startswith(".") and n.lower().endswith(VIDEO_EXTS):
+                    files.append(osp.relpath(osp.join(dirpath, n), root))
+        _shuffle_cache[walk_base] = (time.time(), files)
     if not files:
         raise ValueError("no media files")
-    return play_media(random.choice(files), source="shuffle")
+    history = _load_shuffle_history()
+    fresh = [f for f in files if f not in history]
+    if not fresh:          # everything's been played recently — start over
+        fresh = files
+    pick = random.choice(fresh)
+    keep = max(0, min(SHUFFLE_NO_REPEAT, len(files) - 1))
+    _save_shuffle_history(([pick] + [h for h in history if h != pick])[:keep])
+    return play_media(pick, source="shuffle")
+
+
+def _resume_list() -> dict:
+    """Unfinished library files with a saved position ("continue watching").
+    Reads mpv's watch-later entries; the '#' comment line carries the path
+    (--write-filename-in-watch-later-config)."""
+    root = osp.realpath(MEDIA_ROOT)
+    entries = []
+    try:
+        names = os.listdir(WATCH_LATER_DIR)
+    except OSError:
+        names = []
+    for n in names:
+        wl = osp.join(WATCH_LATER_DIR, n)
+        try:
+            with open(wl) as fh:
+                txt = fh.read(4096)
+        except OSError:
+            continue
+        path, start = None, None
+        for line in txt.splitlines():
+            if line.startswith("#"):
+                path = line.lstrip("# ").strip()
+            elif line.startswith("start="):
+                try:
+                    start = float(line[len("start="):])
+                except ValueError:
+                    pass
+        if not path or start is None:
+            continue
+        real = osp.realpath(path)
+        if not (real == root or real.startswith(root + os.sep)) or not osp.isfile(real):
+            continue      # gone from the library, or not ours
+        entries.append({
+            "path": osp.relpath(real, root),
+            "name": _pretty_name(real, root),
+            "position": start,
+            "saved_at": osp.getmtime(wl),
+        })
+    entries.sort(key=lambda e: e["saved_at"], reverse=True)
+    return {"entries": entries[:10]}
 
 
 def _ipc(cmd: list) -> dict | None:
@@ -376,6 +525,28 @@ def _sub_cycle() -> bool:
     return _ipc(["cycle", "sub"]) is not None
 
 
+def _neighbor_media(delta: int) -> str:
+    """Rel path of the next/previous video beside the currently-playing file —
+    "next episode" for a season folder, sorted the same way the browser lists it."""
+    with _lock:
+        cur = _url if (_profile == "media" and not _stopped) else None
+    if not cur:
+        raise ValueError("nothing from the library is playing")
+    root = osp.realpath(MEDIA_ROOT)
+    folder = osp.dirname(cur)
+    sibs = sorted((n for n in os.listdir(folder)
+                   if not n.startswith(".") and n.lower().endswith(VIDEO_EXTS)),
+                  key=str.lower)
+    try:
+        i = sibs.index(osp.basename(cur))
+    except ValueError:
+        raise ValueError("current file left the library")
+    j = i + delta
+    if not 0 <= j < len(sibs):
+        raise ValueError("no more files in this folder")
+    return osp.relpath(osp.join(folder, sibs[j]), root)
+
+
 def _status() -> dict:
     """Playback status. For media playback (IPC socket open) enrich with the
     transport state the web app's Now-Playing hero needs."""
@@ -398,18 +569,85 @@ def _status() -> dict:
     return st
 
 
+# h264 decode-corruption signature: joining the jetstream HLS while its
+# transcode is (re)starting decodes P-frames against references we never got —
+# smeared video, clean audio. A fresh steady-state rejoin is clean (verified),
+# so the supervisor watches mpv's log and rejoins once when it sees this.
+_CORRUPT_MARKERS = (b"error while decoding", b"Reference", b"unavailable for requested intra")
+CORRUPT_ERR_THRESHOLD = int(os.environ.get("SCREEN_CORRUPT_ERRS", "25"))
+_corrupt_restarts = 0     # per user-initiated playback; reset in _play()
+
+
+def _new_log_errors(pos: int) -> tuple[int, int]:
+    """Count new h264-corruption lines in the mpv log since offset pos."""
+    try:
+        with open(LOG_FILE, "rb") as fh:
+            fh.seek(pos)
+            data = fh.read()
+    except OSError:
+        return 0, pos
+    n = sum(1 for line in data.replace(b"\r", b"\n").split(b"\n")
+            if b"h264:" in line and any(m in line for m in _CORRUPT_MARKERS))
+    return n, pos + len(data)
+
+
 def _supervisor() -> None:
-    """Keep the current playback healthy. For live streams, relaunch mpv if it
-    dies (self-heal a skip / transcode restart). For media files, when mpv exits
-    (movie ended) mark idle so callers can hand the TV back to the Apple TV."""
-    global _stopped, _url, _title, _subtitle, _source
+    """Keep the current playback healthy. For live streams: relaunch mpv if it
+    dies (self-heal a skip / transcode restart) — after a settle delay, so we
+    don't rejoin mid-churn — and rejoin once if the picture is decode-corrupted.
+    For media files, when mpv exits (movie ended) mark idle so callers can hand
+    the TV back to the Apple TV."""
+    global _stopped, _url, _title, _subtitle, _source, _corrupt_restarts
+    dead_since = 0.0
+    last_proc = None
+    log_pos = 0
+    spawn_errors = 0
+    last_video_pts = None
+    video_stalls = 0
     while True:
         time.sleep(3)
         with _lock:
-            if _stopped or _url is None or _alive():
+            if _stopped or _url is None:
+                dead_since = 0.0
+                continue
+            if _proc is not last_proc:          # new spawn -> fresh log trackers
+                last_proc = _proc
+                log_pos = 0
+                spawn_errors = 0
+                last_video_pts = None
+                video_stalls = 0
+            if _alive():
+                dead_since = 0.0
+                if _profile == "live":
+                    n, log_pos = _new_log_errors(log_pos)
+                    spawn_errors += n
+                    if spawn_errors >= CORRUPT_ERR_THRESHOLD and _corrupt_restarts < 3:
+                        _corrupt_restarts += 1
+                        _spawn()                # clean rejoin fixes the smear
+                        continue
+                    # video-freeze watchdog: audio keeps playing but the video
+                    # frame counter stops (post-discontinuity wedge; video-pts
+                    # is unavailable on this profile). 3 consecutive stalled
+                    # reads (~9s) -> clean rejoin.
+                    pts = _ipc_prop("estimated-frame-number")
+                    if pts is not None and pts == last_video_pts and not _ipc_prop("pause"):
+                        video_stalls += 1
+                        if video_stalls >= 3 and _corrupt_restarts < 3:
+                            _corrupt_restarts += 1
+                            video_stalls = 0
+                            _spawn()            # video wedged: clean rejoin
+                    else:
+                        video_stalls = 0
+                    last_video_pts = pts
                 continue
             if _supervise:
-                _spawn()                 # live: relaunch
+                # died (jetstream transcode restart): wait a few seconds before
+                # rejoining so the new run's playlist has settled
+                if dead_since == 0.0:
+                    dead_since = time.time()
+                elif time.time() - dead_since >= 4:
+                    dead_since = 0.0
+                    _spawn()                    # live: relaunch
             else:
                 _stopped, _url, _title, _subtitle, _source = True, None, None, None, None
                 _kiosk("start")               # -> back to the idle dashboard
@@ -437,6 +675,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(200, _media_list(rel))
             except (ValueError, OSError) as exc:
                 self._send(400, {"error": str(exc)})
+        elif self.path == "/media/resume":
+            self._send(200, _resume_list())
         else:
             self._send(404, {"error": "not found"})
 
@@ -450,9 +690,9 @@ class Handler(BaseHTTPRequestHandler):
             url = str(body.get("url", "")).strip()
             if not url:
                 return self._send(422, {"error": "missing url"})
-            title = str(body.get("title", "")).strip() or None
-            subtitle = str(body.get("subtitle", "")).strip() or None
-            source = str(body.get("source", "")).strip() or None
+            title = _clean_text(body.get("title"))
+            subtitle = _clean_text(body.get("subtitle"))
+            source = _clean_text(body.get("source"))
             _play(url, body.get("headers"), bool(body.get("audio_only")),
                   title=title, subtitle=subtitle, source=source)
             self._send(200, {"playing": True, "url": url, "title": title,
@@ -501,9 +741,24 @@ class Handler(BaseHTTPRequestHandler):
                 except (TypeError, ValueError):
                     secs = 0.0
                 ok = _ipc(["seek", secs, "relative"]) is not None
+            elif action == "chapter":       # skip intros/credits on chaptered files
+                try:
+                    n = int(body.get("n", 1) or 1)
+                except (TypeError, ValueError):
+                    n = 1
+                ok = _ipc(["add", "chapter", n]) is not None
+            elif action == "audio":         # cycle audio track (multi-audio files)
+                ok = _ipc(["cycle", "audio"]) is not None
             else:
                 return self._send(400, {"error": "unknown action"})
             self._send(200, {"ok": ok})
+        elif self.path in ("/media/next", "/media/prev"):
+            try:
+                rel = _neighbor_media(1 if self.path.endswith("next") else -1)
+                target = play_media(rel)
+            except (ValueError, OSError) as exc:
+                return self._send(409, {"error": str(exc)})
+            self._send(200, {"playing": target})
         elif self.path == "/stop":
             _stop()
             self._send(200, {"ok": True})
