@@ -83,3 +83,6 @@ done
 echo "----"
 echo "aerials: $ok new, $skip cached, $fail failed  ->  $OUT"
 echo "total cached clips: $(ls -1 "$OUT"/*.mp4 2>/dev/null | wc -l)"
+
+# tag new clips day/night (luminance) so aerial-mode can match the hour
+python3 "$(dirname "$0")/classify-aerials.py" || echo "classify failed (non-fatal)"
