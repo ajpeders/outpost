@@ -19,11 +19,12 @@ the TV set (CEC), hosts the hub app, and runs scheduled automations.
   (pyatv `atv.stream` to the Apple TV), or the Pi-side **livestream / file / shuffle**
   (mpv screen player). Ramp/volume per alarm. Day-of-week scheduling works end to
   end (empty `days` = every day, by design; UI shows it as "Every day").
-- **Phase 4 — On-TV ambient dashboard** 🔧 *in progress* `screen/` ships an mpv
-  player + cage kiosk service and `hub/app/static/dashboard.html`. Glanceable
-  clock/weather/now-playing/alarm kiosk; phone-first, no TV input required.
-  Built: 1080p-friendly ambient stills, weather caching, transparent cursor
-  repair, and optimized kiosk launcher.
+- **Phase 4 — On-TV ambient dashboard** ✅ *(built)* `screen/` ships an mpv
+  player + aerial overlay/kiosk services and `hub/app/static/dashboard.html`.
+  Glanceable clock/weather/now-playing/alarm kiosk; phone-first, no TV input
+  required. Built: 1080p-friendly ambient stills, Apple aerial overlay mode,
+  weather caching through the hub, transparent cursor repair, persistent
+  chromium overlay renderer, and optimized service handoff with screen-player.
 - **Phase 5 — Scenes expansion** ✅ *(built)* Data-driven via `data/hub/scenes.json`
   (falls back to `scenes.DEFAULT_SCENES` in code if missing/invalid). The hub now
   exposes `GET /api/scenes` (list) + `POST /api/scenes/{name}/run` (execute).
@@ -59,6 +60,87 @@ the TV set (CEC), hosts the hub app, and runs scheduled automations.
   `aerial-screen.service` (alternative to the cage `kiosk-screen`; set
   `SCREEN_KIOSK_SERVICE=aerial-screen` so the screen player's mpv handoff stops the
   right one). Clips cached by `screen/fetch-aerials.sh` (`RES=720` to downscale).
+
+- **Perf pass (2026-07-19)** ✅ Overlay renders are now cache-first: the dashboard
+  caches IP geolocation for 24h and skips the weather fetch when the cache is
+  <10 min old, so the per-minute chromium render no longer hits ip-api +
+  open-meteo every cycle (~1,440 external calls/day → ~150). Phone UI: alarm
+  list only re-renders on data change (no more 4s DOM churn eating button
+  states), and polling pauses while the app is backgrounded. Shuffle caches the
+  SMB file walk (5 min TTL) so alarm-time shuffles don't re-crawl the share.
+  Container logs capped (5m × 3 files; they'd hit 85MB unrotated in 12 days).
+
+## QoL round (2026-07-20) ✅ *(all built + deployed)*
+
+- **Sleep timer** — `/api/sleep-timer` (set/status/cancel) + a 30/60/90-min
+  panel in the UI; firing stops Pi playback + AirPlay, powers off the Apple TV
+  and stands the TV down (talks to the screen service directly so it doesn't
+  re-wake the TV).
+- **Auto-off after midnight** — hub loop: 00:00-06:00 (env-tunable), TV on but
+  only the idle dashboard showing (Pi input, nothing playing) for two 5-min
+  checks → CEC standby, then a 1 h cooldown so turning it back on wins.
+- **Resume watching** — media mpv now quits gracefully (IPC) so
+  `--save-position-on-quit` lands in `data/screen/watch_later`; the library UI
+  shows a "Continue watching" row (`/api/media/resume`). mpv clears entries
+  when a file finishes.
+- **Plex queue transport** — queue state machine with `/api/plex/queue`
+  (+`/next`, `/prev`); the hero shows track x/y with Prev/Next/Stop when a
+  playlist is AirPlaying. *(Verify next/prev feel during real listening.)*
+- **Now-playing artwork** — appletv `/api/artwork` (cached by artwork_id);
+  album art in the phone-UI hero for Apple Music / Apple TV playback.
+  *(Verify with real playback.)*
+- **Time-of-day aerials** — `classify-aerials.py` tags clips day/night by
+  luminance (10-bit-aware) into `timeofday.json` (runs from fetch-aerials);
+  aerial-mode plays day clips 07-19 h, night otherwise, swapping the playlist
+  live over mpv IPC. Current cache: 6 day / 6 night.
+- **Weather through the hub** — `/api/weather` (server-side IP-geolocation 24 h
+  + open-meteo 10 min cache, stale-on-error); dashboard fetches same-origin
+  with the old direct path as fallback. Overlay renders are now LAN-local.
+- **Persistent overlay renderer** — aerial-mode drives ONE long-lived headless
+  chromium over CDP (`--remote-debugging-pipe`, fd 3/4): reload → readyState →
+  screenshot ≈ 3 s/cycle vs 8-15 s cold starts; auto re-attach on session loss,
+  restart on wedge, cold one-shot as last resort.
+- **Health panel** — `/api/health` (appletv/cec/screen/plex + disk, CPU temp,
+  load, uptime) rendered as a System panel with status dots in the UI.
+- **Shuffle no-repeat** — last-20 picks persisted (`data/screen/
+  shuffle-history.json`) and excluded until the pool runs dry.
+- **PWA** — manifest + generated icons + apple-touch/standalone meta; "Add to
+  Home Screen" now installs it app-like. Favicon fixed too.
+- **CEC speed/reliability** *(user ask)* — cec service rewritten from libCEC
+  `cec-client` (~10 s cold start per command) to kernel-API `cec-ctl`:
+  ~0.7 s per command, 15 ms cached status. Both host + container now assert
+  the same playback-device config, ending the "adapter reset to unregistered"
+  flakiness. Volume target env-tunable (`CEC_VOLUME_TARGET=5` for a soundbar).
+- Also fixed en route: `/api/scenes` 500 (the `_comment` key in scenes.json
+  broke the list), media titles prettified ("Hokum (2026)", "Show · S01E03")
+  in hero/dashboard/resume rows, alarm rows no longer squish on narrow phones,
+  idle hero copy, UI tested headless end-to-end (13 interactive checks).
+
+## UI overhaul (2026-07-20) ✅ *(built + deployed)*
+
+- Controller visual system rebuilt around a stronger now-playing command hero,
+  warmer mixed-accent palette, denser card rhythm, clearer active states, and a
+  two-column operations layout on desktop that still collapses cleanly on phones.
+- Existing JavaScript hooks and API behavior preserved; this was a UI shell
+  overhaul, not a feature rewrite.
+- Metadata cleanup added while testing: placeholder strings like `"None"`,
+  `"null"`, and `"undefined"` are filtered before they can appear as a
+  now-playing subtitle.
+- Deployed with hub rebuild; `/healthz`, `/api/health`, `/api/screen/status`,
+  and the root page all verified after deploy.
+
+## Current Priorities
+
+1. **Phase 7: Plex alarm source** — add a Plex album/playlist picker to the
+   alarm editor and fire it through the existing Plex queue/AirPlay path.
+2. **Real-listening validation** — exercise Plex queue next/prev/stop and Apple
+   TV artwork during a real playlist session; ROADMAP still calls these out as
+   verify-needed.
+3. **Dashboard polish pass** — after the controller overhaul, apply the same
+   visual discipline to the TV dashboard overlay: typography, spacing, and
+   now-playing/alarm hierarchy over aerials.
+4. **Presence automation spike** — Hailo/person-detection remains the most
+   valuable Pi-native future item once the room-control surface settles.
 
 ## Dropped
 
