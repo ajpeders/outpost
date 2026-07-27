@@ -11,7 +11,10 @@ Runs on the Pi alongside appletv + cec; with host networking the defaults
 from __future__ import annotations
 
 import asyncio
+import datetime
 import os
+import shutil
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -51,27 +54,37 @@ def _jetstream_headers() -> dict:
     return {"Cookie": JETSTREAM_COOKIE} if JETSTREAM_COOKIE else {}
 
 
+def _clean_text(value) -> str | None:
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    if not text or text.lower() in {"none", "null", "undefined", "n/a"}:
+        return None
+    return text
+
+
 def _first_text(data, keys: tuple[str, ...]):
     if isinstance(data, str):
-        return data.strip() or None
+        return _clean_text(data)
     if not isinstance(data, dict):
         return None
     for key in keys:
-        value = data.get(key)
-        if isinstance(value, str) and value.strip():
-            return value.strip()
+        text = _clean_text(data.get(key))
+        if text:
+            return text
     return None
 
 
 def _first_title(data):
     if isinstance(data, str):
-        return data.strip() or None
+        return _clean_text(data)
     if not isinstance(data, dict):
         return None
     for key in ("title", "name", "media", "file", "now_playing", "nowPlaying"):
         value = data.get(key)
-        if isinstance(value, str) and value.strip():
-            return value.strip()
+        text = _clean_text(value)
+        if text:
+            return text
         nested = _first_title(value)
         if nested:
             return nested
@@ -108,11 +121,53 @@ async def _jetstream_now_playing() -> dict | None:
 client: httpx.AsyncClient
 scheduler: alarms.AlarmScheduler
 plex_client: plexmod.PlexClient
-_plex_queue: asyncio.Task | None = None
 # Which HDMI source we last drove the TV to. The Pi's HDMI shows either mpv or
 # the idle dashboard, so "pi" is the resting state; AirPlay/handoff flips it to
 # "appletv". Lets the UI highlight the active input (CEC can't report it here).
 _active_input: str = "pi"
+
+# --- auto-off: after midnight, an idle dashboard shouldn't keep the TV lit ----
+AUTO_OFF = os.environ.get("AUTO_OFF", "1") != "0"
+AUTO_OFF_START = int(os.environ.get("AUTO_OFF_START_HOUR", "0"))   # from 00:xx
+AUTO_OFF_END = int(os.environ.get("AUTO_OFF_END_HOUR", "6"))       # until 06:00
+AUTO_OFF_COOLDOWN = int(os.environ.get("AUTO_OFF_COOLDOWN", "3600"))
+
+
+async def _auto_off_loop() -> None:
+    """Between AUTO_OFF_START..AUTO_OFF_END, if the TV is on but only showing
+    the idle dashboard (Pi input, nothing playing), stand it down. Requires two
+    consecutive positive checks (~10 min of idle) before acting, and backs off
+    for an hour afterwards so a user turning the TV back on wins."""
+    strikes = 0
+    cooldown_until = 0.0
+    while True:
+        await asyncio.sleep(300)
+        if not AUTO_OFF or time.monotonic() < cooldown_until:
+            continue
+        hour = datetime.datetime.now(alarms._TZ).hour
+        in_window = (AUTO_OFF_START <= hour < AUTO_OFF_END) if AUTO_OFF_START < AUTO_OFF_END \
+            else (hour >= AUTO_OFF_START or hour < AUTO_OFF_END)
+        if not in_window or _active_input != "pi":
+            strikes = 0
+            continue
+        try:
+            sc = (await client.get(f"{SCREEN_URL}/status", timeout=5.0)).json()
+            cec = (await client.get(f"{CEC_URL}/api/status", timeout=10.0)).json()
+        except (httpx.RequestError, ValueError):
+            strikes = 0
+            continue
+        if sc.get("playing") or cec.get("tv_power") != "on":
+            strikes = 0
+            continue
+        strikes += 1
+        if strikes < 2:
+            continue
+        strikes = 0
+        cooldown_until = time.monotonic() + AUTO_OFF_COOLDOWN
+        try:
+            await client.post(f"{CEC_URL}/api/tv/off")
+        except httpx.RequestError:
+            pass
 
 
 @asynccontextmanager
@@ -124,7 +179,9 @@ async def lifespan(app: FastAPI):
         client, ATV_URL, CEC_URL,
         os.environ.get("HUB_SELF_URL", "http://localhost:8080"))
     scheduler.start()
+    auto_off = asyncio.create_task(_auto_off_loop())
     yield
+    auto_off.cancel()
     await scheduler.stop()
     await client.aclose()
 
@@ -138,6 +195,8 @@ app = FastAPI(title="livingroom-hub", lifespan=lifespan)
 AERIALS_DIR = Path(os.environ.get("AERIALS_DIR", "/data/aerials"))
 AERIALS_DIR.mkdir(parents=True, exist_ok=True)
 app.mount("/aerials", StaticFiles(directory=AERIALS_DIR), name="aerials")
+# PWA bits (manifest + icons) and any other static assets by URL
+app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
 
 async def _proxy(base: str, path: str, request: Request) -> Response:
@@ -223,9 +282,11 @@ async def test_alarm(alarm_id: str):
 @app.get("/api/scenes")
 async def list_scenes():
     """Available scenes as {name: label}. The UI uses this to render one button per
-    scene; the engine reads the JSON live on each /run so edits don't need a rebuild."""
+    scene; the engine reads the JSON live on each /run so edits don't need a rebuild.
+    Non-dict entries (e.g. a "_comment" string in the JSON) are skipped."""
     return {name: meta.get("label", name)
-            for name, meta in scenesmod.load_scenes().items()}
+            for name, meta in scenesmod.load_scenes().items()
+            if isinstance(meta, dict)}
 
 
 @app.post("/api/scenes/{name}/run")
@@ -275,31 +336,87 @@ async def plex_play(body: dict):
     return {"playing": track}
 
 
+# The playlist queue: one track AirPlays at a time (pyatv streams single
+# files), the loop advances on the track's duration — or immediately when
+# next/prev pokes the event. State is inspectable via /api/plex/queue.
+_queue: dict = {"tracks": [], "index": -1, "task": None, "event": None,
+                "jump": None, "label": None}
+
+
 async def _play_queue(tracks: list[dict], volume=None):
-    for t in tracks:
+    ev: asyncio.Event = _queue["event"]
+    i = 0
+    while 0 <= i < len(tracks):
+        t = tracks[i]
+        _queue["index"] = i
         if not t.get("url"):
+            i += 1
             continue
         await client.post(f"{ATV_URL}/api/stream", json={"url": t["url"], "volume": volume})
         volume = None  # only set volume on the first track
-        await asyncio.sleep(max(1, (t.get("duration") or 0) / 1000))
+        ev.clear()
+        try:
+            await asyncio.wait_for(ev.wait(), timeout=max(1, (t.get("duration") or 0) / 1000))
+        except asyncio.TimeoutError:
+            i += 1          # track ran its course
+            continue
+        i = _queue.get("jump") if _queue.get("jump") is not None else i + 1
+        _queue["jump"] = None
+        # tear the current stream down before starting the next one
+        try:
+            await client.post(f"{ATV_URL}/api/stream/stop")
+            await asyncio.sleep(0.5)
+        except httpx.RequestError:
+            pass
+    _queue.update(index=-1, task=None, tracks=[], label=None)
+
+
+def _queue_jump(delta: int) -> dict:
+    if not _queue["task"] or _queue["index"] < 0:
+        raise HTTPException(409, "no queue playing")
+    target = max(0, min(len(_queue["tracks"]) - 1, _queue["index"] + delta))
+    _queue["jump"] = target
+    _queue["event"].set()
+    return {"ok": True, "index": target, "total": len(_queue["tracks"])}
 
 
 @app.post("/api/plex/play/playlist")
 async def plex_play_playlist(body: dict):
-    global _plex_queue
     tracks = await plex_client.playlist_tracks(body["ratingKey"])
-    if _plex_queue:
-        _plex_queue.cancel()
-    _plex_queue = asyncio.create_task(_play_queue(tracks, body.get("volume")))
+    if _queue["task"]:
+        _queue["task"].cancel()
+    _queue.update(tracks=tracks, index=-1, event=asyncio.Event(), jump=None,
+                  label=body.get("label"))
+    _queue["task"] = asyncio.create_task(_play_queue(tracks, body.get("volume")))
     return {"queued": len(tracks)}
+
+
+@app.get("/api/plex/queue")
+async def plex_queue_status():
+    active = bool(_queue["task"]) and _queue["index"] >= 0
+    if not active:
+        return {"active": False}
+    t = _queue["tracks"][_queue["index"]]
+    return {"active": True, "index": _queue["index"], "total": len(_queue["tracks"]),
+            "label": _queue["label"],
+            "track": {k: t.get(k) for k in ("title", "artist", "album", "duration")}}
+
+
+@app.post("/api/plex/queue/next")
+async def plex_queue_next():
+    return _queue_jump(+1)
+
+
+@app.post("/api/plex/queue/prev")
+async def plex_queue_prev():
+    return _queue_jump(-1)
 
 
 @app.post("/api/plex/stop")
 async def plex_stop():
-    global _plex_queue
-    if _plex_queue:
-        _plex_queue.cancel()
-        _plex_queue = None
+    if _queue["task"]:
+        _queue["task"].cancel()
+    _queue.update(tracks=[], index=-1, task=None, jump=None, label=None)
     await client.post(f"{ATV_URL}/api/stream/stop")
     return {"stopped": True}
 
@@ -363,6 +480,20 @@ async def screen_stop():
     return {"ok": True}
 
 
+def _wake_tv_to_pi() -> asyncio.Task:
+    """Fire-and-forget: wake the TV and claim the Pi input (cec source/active
+    is the full register→image-view-on→active-source sequence). Kicked off
+    FIRST when starting Pi playback so the panel's multi-second warm-up runs
+    concurrently with mpv startup — otherwise the TV wakes late, dwells on
+    whatever input it last showed, and only then jumps to the stream."""
+    async def run():
+        try:
+            await client.post(f"{CEC_URL}/api/source/active")
+        except httpx.RequestError:
+            pass
+    return asyncio.create_task(run())
+
+
 @app.post("/api/screen/livestream")
 async def screen_livestream():
     """Play the jetstream broadcast on the Pi's HDMI (native HDR10, works today).
@@ -372,18 +503,21 @@ async def screen_livestream():
     if not JETSTREAM_URL:
         raise HTTPException(status_code=503, detail="JETSTREAM_URL not configured")
     url = JETSTREAM_URL.split("?", 1)[0]
-    now_playing = await _jetstream_now_playing() or {"title": "Jetstream livestream"}
+    wake = _wake_tv_to_pi()          # TV starts warming up immediately
+    _active_input = "pi"
+    # Title lookup runs concurrently and gets a short budget — a slow homelab
+    # answer must not delay the stream actually starting.
+    np_task = asyncio.create_task(_jetstream_now_playing())
+    try:
+        now_playing = await asyncio.wait_for(np_task, 2.5) or {"title": "Jetstream livestream"}
+    except (asyncio.TimeoutError, asyncio.CancelledError):
+        now_playing = {"title": "Jetstream livestream"}
     title = now_playing["title"]
     await client.post(f"{SCREEN_URL}/play",
                       json={"url": url, "headers": _jetstream_headers(),
                             "title": title, "subtitle": now_playing.get("subtitle"),
                             "source": "livestream"})
-    _active_input = "pi"
-    try:  # switch the TV to the Pi's HDMI input
-        await client.post(f"{CEC_URL}/api/tv/on")
-        await client.post(f"{CEC_URL}/api/source/active")
-    except httpx.RequestError:
-        pass
+    await wake
     return {"ok": True, "playing": "jetstream", "target": "pi",
             "title": title, "subtitle": now_playing.get("subtitle")}
 
@@ -451,14 +585,12 @@ async def media_list(path: str = ""):
 @app.post("/api/media/play")
 async def media_play(body: dict):
     global _active_input
+    # Wake the TV before (not after) starting playback — worst case a bad path
+    # wakes the TV to the dashboard, best case the panel is warm when mpv is.
+    wake = _wake_tv_to_pi()
+    _active_input = "pi"
     r = await client.post(f"{SCREEN_URL}/media/play", json={"path": body.get("path", "")})
-    if r.is_success:
-        _active_input = "pi"
-        try:  # switch the TV to the Pi's HDMI input
-            await client.post(f"{CEC_URL}/api/tv/on")
-            await client.post(f"{CEC_URL}/api/source/active")
-        except httpx.RequestError:
-            pass
+    await wake
     return Response(content=r.content, status_code=r.status_code, media_type="application/json")
 
 
@@ -467,14 +599,10 @@ async def media_shuffle(body: dict | None = None):
     """Play a random file from the SMB library (optionally scoped to {path})."""
     global _active_input
     body = body or {}
+    wake = _wake_tv_to_pi()
+    _active_input = "pi"
     r = await client.post(f"{SCREEN_URL}/shuffle", json={"path": body.get("path", "")})
-    if r.is_success:
-        _active_input = "pi"
-        try:  # switch the TV to the Pi's HDMI input
-            await client.post(f"{CEC_URL}/api/tv/on")
-            await client.post(f"{CEC_URL}/api/source/active")
-        except httpx.RequestError:
-            pass
+    await wake
     return Response(content=r.content, status_code=r.status_code, media_type="application/json")
 
 
@@ -483,6 +611,194 @@ async def media_subtitles():
     """Cycle the subtitle track on the current on-demand playback (off/1/2/…)."""
     r = await client.post(f"{SCREEN_URL}/sub/cycle")
     return Response(content=r.content, status_code=r.status_code, media_type="application/json")
+
+
+@app.get("/api/media/resume")
+async def media_resume():
+    """Continue-watching list (mpv watch-later entries from the screen player)."""
+    try:
+        r = await client.get(f"{SCREEN_URL}/media/resume")
+    except httpx.RequestError as exc:
+        return JSONResponse(status_code=502, content={"error": f"screen player unreachable: {exc}"})
+    return Response(content=r.content, status_code=r.status_code, media_type="application/json")
+
+
+@app.post("/api/media/next")
+async def media_next():
+    """Play the next file beside the current one ("next episode")."""
+    try:
+        r = await client.post(f"{SCREEN_URL}/media/next")
+    except httpx.RequestError as exc:
+        return JSONResponse(status_code=502, content={"error": f"screen player unreachable: {exc}"})
+    return Response(content=r.content, status_code=r.status_code, media_type="application/json")
+
+
+@app.post("/api/media/prev")
+async def media_prev():
+    """Play the previous file beside the current one."""
+    try:
+        r = await client.post(f"{SCREEN_URL}/media/prev")
+    except httpx.RequestError as exc:
+        return JSONResponse(status_code=502, content={"error": f"screen player unreachable: {exc}"})
+    return Response(content=r.content, status_code=r.status_code, media_type="application/json")
+
+
+# --- sleep timer -------------------------------------------------------
+_sleep: dict = {"task": None, "ends_at": None}
+
+
+async def _sleep_fire():
+    """Stop whatever is playing and put the room to bed. Talks to the screen
+    player directly (the hub's own /api/screen/stop would wake the TV back up)."""
+    for method, url in (
+        ("post", f"{SCREEN_URL}/stop"),          # Pi mpv -> back to dashboard
+        ("post", f"{ATV_URL}/api/stream/stop"),  # AirPlay stream, if any
+        ("post", f"{ATV_URL}/api/power/off"),
+        ("post", f"{CEC_URL}/api/tv/off"),
+    ):
+        try:
+            await getattr(client, method)(url)
+        except httpx.RequestError:
+            pass
+
+
+@app.get("/api/sleep-timer")
+async def sleep_timer_status():
+    if not _sleep["task"] or _sleep["task"].done():
+        return {"active": False}
+    return {"active": True, "ends_at": _sleep["ends_at"],
+            "remaining": max(0, _sleep["ends_at"] - time.time())}
+
+
+@app.post("/api/sleep-timer")
+async def sleep_timer_set(body: dict):
+    try:
+        minutes = float(body.get("minutes", 0))
+    except (TypeError, ValueError):
+        minutes = 0
+    if not 0 < minutes <= 24 * 60:
+        return JSONResponse(status_code=422, content={"error": "minutes must be 1-1440"})
+    if _sleep["task"]:
+        _sleep["task"].cancel()
+    _sleep["ends_at"] = time.time() + minutes * 60
+
+    async def run():
+        await asyncio.sleep(minutes * 60)
+        await _sleep_fire()
+
+    _sleep["task"] = asyncio.create_task(run())
+    return {"ok": True, "minutes": minutes, "ends_at": _sleep["ends_at"]}
+
+
+@app.delete("/api/sleep-timer")
+async def sleep_timer_cancel():
+    if _sleep["task"]:
+        _sleep["task"].cancel()
+        _sleep["task"] = None
+    return {"ok": True}
+
+
+# --- weather (server-side cache; the dashboard + phones hit this) -------
+_weather_cache: dict[str, tuple[float, dict]] = {}
+_geo_cache: dict = {"at": 0.0, "data": None}
+WEATHER_TTL = int(os.environ.get("WEATHER_TTL", "600"))
+DEFAULT_LAT = float(os.environ.get("WEATHER_LAT", "39.7392"))
+DEFAULT_LON = float(os.environ.get("WEATHER_LON", "-104.9903"))
+
+
+@app.get("/api/weather")
+async def weather(lat: float | None = None, lon: float | None = None):
+    """Open-meteo forecast, geolocated by IP when no coords given. One upstream
+    call per 10 min for the whole house; overlay renders stay LAN-local."""
+    city = ""
+    if lat is None or lon is None:
+        g = _geo_cache["data"]
+        if not g or time.time() - _geo_cache["at"] > 86400:
+            try:
+                r = await client.get("http://ip-api.com/json/", timeout=5.0)
+                g = r.json() if r.is_success else None
+            except (httpx.RequestError, ValueError):
+                g = None
+            if g and g.get("lat"):
+                _geo_cache.update(at=time.time(), data=g)
+        g = g or {}
+        lat = g.get("lat", DEFAULT_LAT)
+        lon = g.get("lon", DEFAULT_LON)
+        city = g.get("city", "")
+    key = f"{round(lat, 2)},{round(lon, 2)}"
+    hit = _weather_cache.get(key)
+    if hit and time.time() - hit[0] < WEATHER_TTL:
+        return hit[1]
+    url = (f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}"
+           f"&current=temperature_2m,weather_code"
+           f"&daily=weather_code,temperature_2m_max,temperature_2m_min"
+           f"&temperature_unit=fahrenheit&timezone=auto&forecast_days=7")
+    try:
+        r = await client.get(url, timeout=10.0)
+        data = r.json()
+    except (httpx.RequestError, ValueError):
+        if hit:                      # upstream down -> serve stale over nothing
+            return {**hit[1], "stale": True}
+        return JSONResponse(status_code=502, content={"error": "weather unavailable"})
+    payload = {"city": city, "lat": lat, "lon": lon, "data": data}
+    _weather_cache[key] = (time.time(), payload)
+    return payload
+
+
+# --- health (one-glance service + system state) -------------------------
+@app.get("/api/health")
+async def health():
+    async def probe(name: str, url: str, timeout: float = 5.0):
+        try:
+            r = await client.get(url, timeout=timeout)
+            return name, (r.json() if r.is_success else {"error": f"HTTP {r.status_code}"}), r.is_success
+        except (httpx.RequestError, ValueError) as exc:
+            return name, {"error": str(exc)[:120]}, False
+
+    async def probe_plex():
+        try:
+            secs = await asyncio.wait_for(plex_client.music_sections(), timeout=5.0)
+            return "plex", {"sections": len(secs)}, True
+        except Exception as exc:  # noqa: BLE001 - health must never throw
+            return "plex", {"error": str(exc)[:120]}, False
+
+    results = await asyncio.gather(
+        probe("appletv", f"{ATV_URL}/api/status", 8.0),
+        probe("cec", f"{CEC_URL}/api/status", 12.0),
+        probe("screen", f"{SCREEN_URL}/status"),
+        probe_plex(),
+    )
+    services = {}
+    for name, data, ok in results:
+        if name == "appletv":  # reachable+paired is the real health, not HTTP 200
+            ok = ok and bool(data.get("reachable")) and bool(data.get("paired"))
+        if name == "cec":
+            ok = ok and bool(data.get("adapter"))
+        services[name] = {"ok": ok, **data}
+
+    system: dict = {}
+    try:
+        du = shutil.disk_usage("/")
+        system["disk_used_pct"] = round(100 * du.used / du.total, 1)
+        system["disk_free_gb"] = round(du.free / 1e9, 1)
+    except OSError:
+        pass
+    try:
+        with open("/sys/class/thermal/thermal_zone0/temp") as fh:
+            system["cpu_temp_c"] = round(int(fh.read().strip()) / 1000, 1)
+    except (OSError, ValueError):
+        pass
+    try:
+        system["load_1m"] = round(os.getloadavg()[0], 2)
+    except OSError:
+        pass
+    try:
+        with open("/proc/uptime") as fh:
+            system["uptime_days"] = round(float(fh.read().split()[0]) / 86400, 1)
+    except (OSError, ValueError):
+        pass
+    return {"ok": all(s["ok"] for s in services.values()), "services": services,
+            "system": system, "sleep_timer": bool(_sleep["task"] and not _sleep["task"].done())}
 
 
 # --- TV input switcher (CEC) ---
