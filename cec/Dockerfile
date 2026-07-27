@@ -4,11 +4,11 @@ ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PORT=8020
 
-# libCEC + the cec-client CLI we shell out to. On a Pi 5 the CEC bus is the
-# kernel /dev/cec0 device (vc4/KMS) — passed through from the host in compose.
-# cec-utils pulls the right libcec (libcec7 on Debian trixie, RPi-patched).
+# cec-ctl (v4l-utils) talks straight to the kernel /dev/cec0 device (vc4/KMS,
+# passed through from the host in compose) — no libCEC daemon cold-start, so
+# commands land in well under a second instead of ~10s.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        cec-utils \
+        v4l-utils \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

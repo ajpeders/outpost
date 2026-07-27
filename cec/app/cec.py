@@ -1,10 +1,19 @@
-"""Thin async wrapper around libCEC's `cec-client`.
+"""Thin async wrapper around the kernel CEC API via `cec-ctl` (v4l-utils).
 
-Every call spawns a one-shot `cec-client -s` that sends a line or two on the CEC
-bus and exits. That's plenty for power/volume/source control; a long-lived
-listener (for inbound remote/event handling) is a later phase.
+Previously this shelled out to libCEC's `cec-client -s`, which cold-starts in
+~5-10s per command — every button press paid that. `cec-ctl` talks straight to
+the kernel /dev/cec0 device: register + send + reply is well under a second
+(the bus reply itself is ~20ms).
 
-TV is CEC logical address 0. The Pi's own source is addressed as "self".
+It also fixes the reliability problem: the host side (screen player's
+tv-reclaim / input switching) already uses cec-ctl and registers the Pi as a
+CEC *playback device*. libCEC kept reconfiguring the shared adapter to
+"unregistered", after which the host's active-source messages were ignored by
+the TV. Now both sides assert the same playback-device config, so the adapter
+state stays consistent no matter who talked last.
+
+TV is CEC logical address 0. Volume goes to CEC_VOLUME_TARGET (default the TV;
+set 5 for a soundbar/AVR that implements System Audio Control).
 """
 from __future__ import annotations
 
@@ -14,90 +23,116 @@ import re
 import time
 
 TV = "0"  # CEC logical address of the TV
+DEV = os.environ.get("CEC_ADAPTER", "/dev/cec0")
+VOLUME_TARGET = os.environ.get("CEC_VOLUME_TARGET", TV)
 
-# cec-client cold-start is slow (~10s), so cache the status the UI polls.
-_STATUS_TTL = 12.0
+_STATUS_TTL = 5.0
 _status_cache: dict = {"at": 0.0, "data": None}
+_phys_addr: str | None = None   # cached "x.y.z.w" (changes only on replug)
 
 
 class CECError(Exception):
     """Surfaced to the API as a 503 (adapter missing, bus timeout, …)."""
 
 
-# /dev/cec0 can only be opened by ONE cec-client at a time — serialize all
-# invocations so concurrent requests can't collide (a collision left a stuck
-# process holding the bus, wedging CEC entirely).
+# One CEC transaction at a time — concurrent senders on the same adapter can
+# collide and wedge the bus.
 _LOCK = asyncio.Lock()
 
 
-async def _cec(*commands: str, timeout: float = 15.0) -> str:
-    """Feed one or more commands to `cec-client -s` and return its output."""
-    args = ["cec-client", "-s", "-d", "1"]
-    adapter = os.environ.get("CEC_ADAPTER")  # e.g. /dev/cec0 to force it
-    if adapter:
-        args.append(adapter)
-
+async def _cec_ctl(*args: str, timeout: float = 8.0) -> str:
+    """Run one cec-ctl invocation (skipping the shared lock is never worth it)."""
+    cmd = ["cec-ctl", "-s", "-d", DEV, *args]
     async with _LOCK:
         try:
             proc = await asyncio.create_subprocess_exec(
-                *args,
-                stdin=asyncio.subprocess.PIPE,
+                *cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
             )
-        except FileNotFoundError as exc:  # cec-client not installed
-            raise CECError("cec-client not found in container") from exc
-
-        payload = ("\n".join(commands) + "\n").encode()
+        except FileNotFoundError as exc:
+            raise CECError("cec-ctl not found in container (install v4l-utils)") from exc
         try:
-            out, _ = await asyncio.wait_for(proc.communicate(payload), timeout)
+            out, _ = await asyncio.wait_for(proc.communicate(), timeout)
         except asyncio.TimeoutError as exc:
             proc.kill()
-            await proc.wait()  # reap so it actually releases /dev/cec0
-            raise CECError("cec-client timed out (no CEC adapter / bus?)") from exc
+            await proc.wait()
+            raise CECError("cec-ctl timed out (CEC bus stuck?)") from exc
 
     text = out.decode(errors="replace")
-    if "no serial port" in text.lower() or "could not open a connection" in text.lower():
-        raise CECError("no CEC adapter — is /dev/cec0 passed into the container?")
+    low = text.lower()
+    if "cannot open" in low or "no such file" in low or "failed to open" in low:
+        raise CECError(f"no CEC adapter — is {DEV} passed into the container?")
     return text
+
+
+async def _register() -> None:
+    """(Re)assert the Pi as a CEC playback device — idempotent and cheap.
+    An unregistered initiator's messages are ignored by the TV."""
+    await _cec_ctl("--playback")
+
+
+async def _physical_address() -> str:
+    """The Pi's CEC physical address (which TV HDMI port), e.g. '1.0.0.0'."""
+    global _phys_addr
+    if _phys_addr:
+        return _phys_addr
+    out = await _cec_ctl()
+    m = re.search(r"Physical Address\s*:\s*([0-9a-fA-F]\.[0-9a-fA-F]\.[0-9a-fA-F]\.[0-9a-fA-F])", out)
+    _phys_addr = m.group(1) if m else "1.0.0.0"
+    return _phys_addr
 
 
 # --- actions -----------------------------------------------------------
 async def tv_on() -> None:
-    await _cec(f"on {TV}")
+    await _cec_ctl("--playback", "--to", TV, "--image-view-on")
 
 
 async def tv_off() -> None:
-    await _cec(f"standby {TV}")
+    await _cec_ctl("--playback", "--to", TV, "--standby")
 
 
 async def volume(direction: str) -> None:
-    verb = {"up": "volup", "down": "voldown", "mute": "mute"}.get(direction)
-    if verb is None:
+    cmd = {"up": "volume-up", "down": "volume-down", "mute": "mute"}.get(direction)
+    if cmd is None:
         raise ValueError("direction must be up|down|mute")
-    await _cec(verb)
+    await _cec_ctl("--playback", "--to", VOLUME_TARGET,
+                   f"--user-control-pressed", f"ui-cmd={cmd}",
+                   "--user-control-released")
 
 
 async def make_active_source() -> None:
-    """Switch the TV to the Pi's HDMI input (announce as active source)."""
-    await _cec("as")
+    """Switch the TV to the Pi's HDMI input (same sequence as tv-reclaim.sh:
+    register → wake → active-source with our real physical address)."""
+    pa = await _physical_address()
+    await _register()
+    await _cec_ctl("--to", TV, "--image-view-on")
+    await _cec_ctl("--active-source", f"phys-addr={pa}")
 
 
 async def release_source() -> None:
     """Hand the TV back (inactive source)."""
-    await _cec("is")
+    pa = await _physical_address()
+    await _cec_ctl("--inactive-source", f"phys-addr={pa}")
 
 
 # --- status ------------------------------------------------------------
+def _parse_power(out: str) -> str:
+    m = re.search(r"pwr-state:\s*([a-z-]+)", out)
+    if not m:
+        return "unknown"
+    state = m.group(1)
+    # normalize transitional states to what the UI already understands
+    return {"to-on": "on", "to-standby": "standby"}.get(state, state)
+
+
 async def tv_power() -> str:
-    out = await _cec(f"pow {TV}")
-    m = re.search(r"power status:\s*(\S+)", out)
-    return m.group(1) if m else "unknown"
+    out = await _cec_ctl("--playback", "--to", TV, "--give-device-power-status")
+    return _parse_power(out)
 
 
 async def status() -> dict:
-    """Cheap TV power probe for the UI — a single `pow` call, cached briefly.
-    (Avoids the old scan+pow = two slow cec-client spawns per poll.)"""
+    """TV power probe for the UI — one fast kernel-CEC query, cached briefly."""
     now = time.monotonic()
     cached = _status_cache["data"]
     if cached is not None and now - _status_cache["at"] < _STATUS_TTL:
@@ -105,10 +140,9 @@ async def status() -> dict:
 
     info: dict = {"adapter": False, "tv_power": None}
     try:
-        out = await _cec(f"pow {TV}")
+        out = await _cec_ctl("--playback", "--to", TV, "--give-device-power-status")
         info["adapter"] = True
-        m = re.search(r"power status:\s*(\S+)", out)
-        info["tv_power"] = m.group(1) if m else "unknown"
+        info["tv_power"] = _parse_power(out)
     except CECError as exc:
         info["error"] = str(exc)
 
