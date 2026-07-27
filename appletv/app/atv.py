@@ -80,6 +80,7 @@ class ATVManager(DeviceListener):
         self._lock = asyncio.Lock()
         self._pairing = None  # in-flight PairingHandler between begin() and pin()
         self._stream_task: Optional[asyncio.Task] = None  # active AirPlay stream
+        self._artwork_cache: Optional[tuple] = None  # (artwork_id, bytes, mimetype)
 
     # --- lifecycle -----------------------------------------------------
     @property
@@ -247,6 +248,28 @@ class ATVManager(DeviceListener):
             "repeat": playing.repeat.name if playing.repeat else None,
             "shuffle": playing.shuffle.name if playing.shuffle else None,
         }
+
+    async def artwork(self) -> tuple[bytes, str] | None:
+        """Now-playing artwork (bytes, mimetype), cached per artwork_id so the
+        UI's poll doesn't re-pull the image from the Apple TV every few seconds."""
+        atv = await self._connect()
+        art_id = None
+        try:
+            art_id = atv.metadata.artwork_id
+        except Exception:  # noqa: BLE001
+            pass
+        if art_id and self._artwork_cache and self._artwork_cache[0] == art_id:
+            return self._artwork_cache[1], self._artwork_cache[2]
+        try:
+            art = await atv.metadata.artwork(width=600, height=None)
+        except Exception:  # noqa: BLE001 - no artwork for this content
+            return None
+        if art is None or not art.bytes:
+            return None
+        mimetype = art.mimetype or "image/jpeg"
+        if art_id:
+            self._artwork_cache = (art_id, art.bytes, mimetype)
+        return art.bytes, mimetype
 
     async def app_list(self) -> list[dict[str, str]]:
         atv = await self._connect()

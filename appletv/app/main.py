@@ -16,7 +16,7 @@ import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 
 from .atv import ATVError, ATVManager, REMOTE_COMMANDS
 
@@ -84,6 +84,16 @@ async def pair_cancel():
 @app.get("/api/state")
 async def state():
     return await manager.now_playing()
+
+
+@app.get("/api/artwork")
+async def artwork():
+    """Now-playing artwork as raw image bytes (404 when nothing has art)."""
+    art = await manager.artwork()
+    if art is None:
+        raise HTTPException(status_code=404, detail="no artwork")
+    return Response(content=art[0], media_type=art[1],
+                    headers={"cache-control": "no-cache"})
 
 
 @app.get("/api/apps")
