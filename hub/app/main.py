@@ -801,6 +801,186 @@ async def health():
             "system": system, "sleep_timer": bool(_sleep["task"] and not _sleep["task"].done())}
 
 
+# --- homelab (Plex server box) status + Plex client-control playback ----
+_homelab_cache: dict = {"at": 0.0, "data": None}
+HOMELAB_TTL = 20
+# share-relative library prefix -> (Plex section, item type) as mounted on the
+# server (/data/movies, /data/tv). type 1 = movie, 4 = episode.
+_PLEX_VIDEO_SECTIONS = {"movies": ("1", 1), "tv": ("2", 4)}
+_plex_path_cache: dict = {"at": 0.0, "by_path": {}, "by_base": {}}
+PLEX_ATV_BUNDLE = "com.plexapp.plex"
+
+
+async def _plex_json(path: str, **params) -> dict:
+    r = await client.get(
+        f"{plexmod.PLEX_URL}{path}",
+        params={**params, "X-Plex-Token": plexmod.PLEX_TOKEN},
+        headers={"Accept": "application/json"},
+        timeout=8.0,
+    )
+    r.raise_for_status()
+    return r.json().get("MediaContainer", {})
+
+
+@app.get("/api/homelab")
+async def homelab():
+    """One-glance homelab status: host latency, Plex server + active streams,
+    and the jetstream live channel. Cached so the TV overlay (re-rendered every
+    minute) and phones share one probe."""
+    if _homelab_cache["data"] and time.time() - _homelab_cache["at"] < HOMELAB_TTL:
+        return _homelab_cache["data"]
+    plex_url = httpx.URL(plexmod.PLEX_URL)
+    host, port = plex_url.host, plex_url.port or 32400
+
+    async def tcp_latency():
+        t0 = time.monotonic()
+        try:
+            _, writer = await asyncio.wait_for(asyncio.open_connection(host, port), timeout=2.0)
+            writer.close()
+            return round((time.monotonic() - t0) * 1000, 1)
+        except (OSError, asyncio.TimeoutError):
+            return None
+
+    async def plex_info():
+        try:
+            root = await _plex_json("/")
+            streams = (await _plex_json("/status/sessions")).get("Metadata") or []
+            return {
+                "ok": True,
+                "name": root.get("friendlyName"),
+                "version": (root.get("version") or "").split("-")[0],
+                "sessions": len(streams),
+                "transcodes": sum(1 for m in streams if m.get("TranscodeSession")),
+                "titles": [m.get("grandparentTitle") or m.get("title") for m in streams][:3],
+            }
+        except Exception as exc:  # noqa: BLE001 - status must never throw
+            return {"ok": False, "error": str(exc)[:120]}
+
+    async def live_info():
+        if not JETSTREAM_TITLE_URL:
+            return None
+        try:
+            r = await client.get(JETSTREAM_TITLE_URL, headers=_jetstream_headers(), timeout=5.0)
+            d = r.json()
+            return {"ok": True, "playing": bool(d.get("playing")),
+                    "title": _clean_text(d.get("title")),
+                    "position": d.get("position_seconds"),
+                    "duration": d.get("duration_seconds")}
+        except (httpx.RequestError, ValueError):
+            return {"ok": False}
+
+    latency, plex, live = await asyncio.gather(tcp_latency(), plex_info(), live_info())
+    data = {"host": host, "up": latency is not None, "latency_ms": latency,
+            "plex": plex, "live": live}
+    _homelab_cache.update(at=time.time(), data=data)
+    return data
+
+
+async def _plex_video_lookup(rel_path: str):
+    """Map a share-relative library path (movies/…, tv/…) to its Plex item by
+    exact Part-file match; basename match is the fallback for copies that live
+    outside the indexed trees (e.g. _4k_archive). Returns metadata dict or None."""
+    now = time.time()
+    if now - _plex_path_cache["at"] > 600 or not _plex_path_cache["by_path"]:
+        by_path: dict = {}
+        by_base: dict = {}
+        by_dir: dict = {}
+        for section, item_type in _PLEX_VIDEO_SECTIONS.values():
+            mc = await _plex_json(f"/library/sections/{section}/all", type=item_type)
+            for m in mc.get("Metadata") or []:
+                entry = {
+                    "ratingKey": m.get("ratingKey"),
+                    "title": m.get("title"),
+                    "grandparentTitle": m.get("grandparentTitle"),
+                    "year": m.get("year"),
+                    "resolution": next((med.get("videoResolution")
+                                        for med in m.get("Media") or []), None),
+                }
+                for med in m.get("Media") or []:
+                    for p in med.get("Part") or []:
+                        f = p.get("file") or ""
+                        if f:
+                            by_path[f] = entry
+                            by_base[os.path.basename(f)] = entry
+                            # movies only: "Title (Year)" folder name — lets an
+                            # unindexed copy (e.g. _4k_archive) find the library's
+                            # version of the same movie
+                            if item_type == 1:
+                                by_dir[os.path.basename(os.path.dirname(f))] = entry
+        _plex_path_cache.update(at=now, by_path=by_path, by_base=by_base, by_dir=by_dir)
+    return (_plex_path_cache["by_path"].get(f"/data/{rel_path}")
+            or _plex_path_cache["by_base"].get(os.path.basename(rel_path))
+            or _plex_path_cache.get("by_dir", {}).get(os.path.basename(os.path.dirname(rel_path))))
+
+
+@app.post("/api/plex/play_on_atv")
+async def plex_play_on_atv(body: dict):
+    """Play a library file on the Apple TV through its Plex app (proper 4K
+    HDR/DV hardware path; the Pi caps HDR at 1080p). Flow: resolve the Plex
+    item by file path -> TV to ATV input -> launch Plex -> wait for the app to
+    advertise as a player -> send playMedia straight to the client."""
+    global _active_input
+    rel = (body.get("path") or "").strip("/")
+    if not rel:
+        raise HTTPException(status_code=400, detail="path required")
+    try:
+        item = await _plex_video_lookup(rel)
+    except (httpx.HTTPError, ValueError) as exc:
+        raise HTTPException(status_code=502, detail=f"Plex lookup failed: {exc}") from exc
+    if not item:
+        raise HTTPException(status_code=404, detail="file not in the Plex library")
+
+    # TV over to the Apple TV while Plex spins up (all tolerant of CEC hiccups)
+    await client.post(f"{CEC_URL}/api/tv/on")
+    await client.post(f"{CEC_URL}/api/source/release")
+    await client.post(f"{ATV_URL}/api/power/on")
+    await client.post(f"{ATV_URL}/api/launch/{PLEX_ATV_BUNDLE}")
+    _active_input = "appletv"
+
+    target = None
+    for _ in range(12):                      # ~24s for the app to start advertising
+        try:
+            clients = (await _plex_json("/clients")).get("Server") or []
+        except (httpx.HTTPError, ValueError):
+            clients = []
+        if clients:
+            target = clients[0]
+            break
+        await asyncio.sleep(2)
+    if not target:
+        raise HTTPException(status_code=504, detail=(
+            "Plex app never advertised as a player. On the Apple TV: "
+            "Plex app > Settings > Advertise as Player (enable once)."))
+
+    plex_url = httpx.URL(plexmod.PLEX_URL)
+    server_id = (await _plex_json("/")).get("machineIdentifier")
+    try:
+        r = await client.get(
+            f"http://{target['address']}:{target['port']}/player/playback/playMedia",
+            params={
+                "key": f"/library/metadata/{item['ratingKey']}",
+                "offset": 0,
+                "machineIdentifier": server_id,
+                "address": plex_url.host,
+                "port": plex_url.port or 32400,
+                "protocol": "http",
+                "token": plexmod.PLEX_TOKEN,
+                "commandID": 1,
+                "type": "video",
+            },
+            headers={"X-Plex-Target-Client-Identifier": target.get("machineIdentifier", ""),
+                     "X-Plex-Client-Identifier": "livingroom-hub"},
+            timeout=10.0,
+        )
+    except httpx.RequestError as exc:
+        raise HTTPException(status_code=502, detail=f"playMedia failed: {exc}") from exc
+    if not r.is_success:
+        raise HTTPException(status_code=502, detail=f"playMedia HTTP {r.status_code}")
+    title = item.get("grandparentTitle") or item.get("title") or rel
+    return {"ok": True, "title": title, "resolution": item.get("resolution"),
+            "client": target.get("name")}
+
+
 # --- TV input switcher (CEC) ---
 @app.get("/api/input/status")
 async def input_status():

@@ -93,10 +93,17 @@
   .np-title { font-size: 2.6vw; font-weight: 700; margin-top: .3vh; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .np-sub { font-size: 1.6vw; }
 
-  /* hostname label — shown verbatim (matches the machine's own capitalization) */
-  .room { font-size: 1.4vw; font-weight: 700; letter-spacing: .04em; }
-  .alarm-next { font-size: 1.5vw; font-weight: 600; margin-top: 1vh; }
+  /* bottom-left stack hierarchy: now-playing (loud) > alarm > homelab/room (quiet) */
+  .alarm-next { font-size: 1.5vw; font-weight: 600; margin-top: 1.2vh; }
   .alarm-next .t { font-weight: 700; }
+  .homelab { font-size: 1.3vw; font-weight: 600; margin-top: 1vh; opacity: .9;
+             max-width: 44vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .homelab .sep { opacity: .55; margin: 0 .4em; }
+  .homelab .live-dot { display: inline-block; width: .55em; height: .55em; border-radius: 50%;
+                       background: #ff5252; margin-right: .3em; vertical-align: .05em;
+                       box-shadow: 0 0 8px rgba(255,82,82,.8); }
+  /* hostname label — shown verbatim (matches the machine's own capitalization) */
+  .room { font-size: 1.3vw; font-weight: 700; letter-spacing: .04em; opacity: .85; }
 </style>
 </head>
 <body>
@@ -127,7 +134,8 @@
           <div class="np-sub" id="np-sub"></div>
         </div>
         <div class="alarm-next" id="alarm-next"></div>
-        <div class="room" id="room" style="margin-top:1.5vh"></div>
+        <div class="homelab" id="homelab"></div>
+        <div class="room" id="room" style="margin-top:1vh"></div>
       </div>
       <div class="forecast" id="forecast"></div>
     </div>
@@ -159,6 +167,7 @@ const ICONS = {
   storm:'<svg viewBox="0 0 24 24"><path d="M7 14h9.4a3.5 3.5 0 0 0 .3-7 5 5 0 0 0-9.6-1.2A3.9 3.9 0 0 0 7 14z"/><path d="M12.5 15l-2.2 3.4h2.4l-1.6 2.8"/></svg>',
   dot:'<svg viewBox="0 0 24 24"><circle class="fill" cx="12" cy="12" r="2"/></svg>',
   alarm:'<svg viewBox="0 0 24 24"><circle cx="12" cy="13" r="6.5"/><path d="M12 10v3l2 1.3M5.5 6.5 3.2 4.6M18.5 6.5l2.3-1.9M7.6 18.6 6 20.6M16.4 18.6 18 20.6"/></svg>',
+  server:'<svg viewBox="0 0 24 24"><rect x="4" y="4.5" width="16" height="6.2" rx="1.4"/><rect x="4" y="13.3" width="16" height="6.2" rx="1.4"/><circle class="fill" cx="7.4" cy="7.6" r=".9"/><circle class="fill" cx="7.4" cy="16.4" r=".9"/></svg>',
 };
 const iconHTML = k => '<span class="icon">' + (ICONS[k] || ICONS.dot) + '</span>';
 const WCODE = {  // open-meteo weather codes -> [icon key, label]
@@ -184,6 +193,7 @@ const el = {
   npSub: document.getElementById('np-sub'),
   room: document.getElementById('room'),
   alarmNext: document.getElementById('alarm-next'),
+  homelab: document.getElementById('homelab'),
 };
 
 function fetchJson(url, timeout = 7000) {
@@ -463,6 +473,40 @@ async function nextAlarm() {
   } catch (e) { el.alarmNext.textContent = ''; }
 }
 nextAlarm(); setInterval(nextAlarm, 60 * 1000);
+
+// ---- homelab status (same-origin hub; hub caches the probes) ----
+function sep() { const s = document.createElement('span'); s.className = 'sep'; s.textContent = '·'; return s; }
+async function homelabStatus() {
+  try {
+    const h = await fetchJson('/api/homelab', 4000);
+    const box = el.homelab;
+    box.replaceChildren();
+    const icon = document.createElement('span');
+    icon.innerHTML = iconHTML('server') + ' ';
+    box.appendChild(icon);
+    if (!h.up) { box.appendChild(document.createTextNode((h.host || 'homelab') + ' offline')); return; }
+    const name = (h.plex && h.plex.name) || h.host || 'homelab';
+    box.appendChild(document.createTextNode(name));
+    if (h.latency_ms != null) {
+      box.appendChild(sep());
+      box.appendChild(document.createTextNode(h.latency_ms + ' ms'));
+    }
+    if (h.plex && h.plex.ok) {
+      box.appendChild(sep());
+      const n = h.plex.sessions || 0;
+      let plexTxt = n === 0 ? 'Plex idle' : 'Plex ' + n + (n === 1 ? ' stream' : ' streams');
+      if (h.plex.transcodes) plexTxt += ' (' + h.plex.transcodes + ' transcode)';
+      box.appendChild(document.createTextNode(plexTxt));
+    }
+    if (h.live && h.live.ok && h.live.playing && h.live.title) {
+      box.appendChild(sep());
+      const dot = document.createElement('span'); dot.className = 'live-dot';
+      box.appendChild(dot);
+      box.appendChild(document.createTextNode(h.live.title));
+    }
+  } catch (e) { el.homelab.replaceChildren(); }
+}
+homelabStatus(); setInterval(homelabStatus, 60 * 1000);
 </script>
 </body>
 </html>
