@@ -4,140 +4,190 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>Living Room</title>
+<link rel="icon" href="/static/icon-192.png">
+<link rel="manifest" href="/static/manifest.json">
+<meta name="theme-color" content="#101114">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Living Room">
+<link rel="apple-touch-icon" href="/static/icon-180.png">
 <style>
   :root {
     color-scheme: dark;
-    --bg: #101114;
-    --surface: #181a1f;
-    --surface-2: #22252c;
-    --surface-3: #2c3038;
-    --line: #383d47;
-    --fg: #f4f0ea;
-    --muted: #a9adb7;
-    --dim: #787f8d;
-    --accent: #2f8cff;
-    --accent-2: #18a87f;
-    --danger: #d85b62;
-    --warn: #e6b84a;
-    --shadow: 0 18px 48px rgba(0, 0, 0, .28);
+    --bg: #0b0c0a;
+    --surface: rgba(27, 29, 25, .92);
+    --surface-2: rgba(39, 42, 36, .94);
+    --surface-3: rgba(55, 59, 50, .98);
+    --line: rgba(232, 224, 199, .14);
+    --line-strong: rgba(232, 224, 199, .28);
+    --fg: #f7f1e2;
+    --muted: #b9b09d;
+    --dim: #817a6c;
+    --accent: #38a3ff;
+    --accent-2: #21b17b;
+    --gold: #d7a843;
+    --danger: #e15f5b;
+    --warn: #e1b957;
+    --ink: #11140f;
+    --shadow: 0 22px 70px rgba(0, 0, 0, .42);
+    --soft-shadow: 0 10px 30px rgba(0, 0, 0, .24);
   }
 
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-  html, body { min-height: 100%; }
+  html, body { min-height: 100%; background: var(--bg); }
   body {
     margin: 0;
-    font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    background: var(--bg);
+    font-family: "Avenir Next", "Nunito Sans", "Segoe UI", sans-serif;
+    background:
+      linear-gradient(135deg, rgba(56, 163, 255, .16), transparent 30%),
+      linear-gradient(315deg, rgba(215, 168, 67, .14), transparent 32%),
+      repeating-linear-gradient(90deg, rgba(255, 255, 255, .025) 0 1px, transparent 1px 84px),
+      repeating-linear-gradient(0deg, rgba(255, 255, 255, .018) 0 1px, transparent 1px 84px),
+      var(--bg);
     color: var(--fg);
+    letter-spacing: 0;
   }
   button, input, select { font: inherit; }
-  button { border: 0; color: var(--fg); cursor: pointer; touch-action: manipulation; }
+  button {
+    border: 1px solid transparent; color: var(--fg); cursor: pointer;
+    touch-action: manipulation; user-select: none;
+  }
   button:disabled { cursor: not-allowed; opacity: .55; }
 
-  .shell { width: min(1120px, 100%); margin: 0 auto; padding: 18px 14px 28px; }
+  .shell { width: min(1180px, 100%); margin: 0 auto; padding: 18px 14px 32px; }
 
   .topbar {
     display: grid; grid-template-columns: minmax(0, 1fr) auto;
-    gap: 14px; align-items: center; padding: 14px 0 18px;
+    gap: 14px; align-items: center; padding: 10px 0 16px;
   }
-  .eyebrow { color: var(--muted); font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
-  h1 { margin: 3px 0 0; font-size: 28px; line-height: 1.05; font-weight: 750; }
+  .eyebrow {
+    color: var(--gold); font-size: 11px; font-weight: 800;
+    letter-spacing: .14em; text-transform: uppercase;
+  }
+  h1 { margin: 2px 0 0; font-size: 30px; line-height: 1.02; font-weight: 800; }
   .status-pill {
     display: inline-flex; align-items: center; gap: 8px; min-height: 36px;
-    padding: 8px 12px; border: 1px solid var(--line); border-radius: 999px;
-    background: var(--surface); color: var(--muted); font-size: 13px; white-space: nowrap;
+    padding: 8px 12px; border: 1px solid var(--line);
+    border-radius: 8px; background: rgba(15, 17, 13, .72);
+    color: var(--muted); font-size: 13px; white-space: nowrap;
+    box-shadow: var(--soft-shadow);
   }
-  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--warn); box-shadow: 0 0 0 4px rgba(230, 184, 74, .12); }
-  .dot.ok { background: var(--accent-2); box-shadow: 0 0 0 4px rgba(24, 168, 127, .13); }
-  .dot.bad { background: var(--danger); box-shadow: 0 0 0 4px rgba(216, 91, 98, .14); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--warn); box-shadow: 0 0 0 4px rgba(225, 185, 87, .14); }
+  .dot.ok { background: var(--accent-2); box-shadow: 0 0 0 4px rgba(33, 177, 123, .15); }
+  .dot.bad { background: var(--danger); box-shadow: 0 0 0 4px rgba(225, 95, 91, .16); }
 
   /* --- Now playing hero (the Pi's HDMI is the main screen) --- */
   .hero {
-    display: grid; gap: 4px; padding: 18px;
-    border: 1px solid var(--line); border-radius: 8px;
-    background: var(--surface); box-shadow: var(--shadow);
+    position: relative;
+    display: grid; gap: 4px; padding: 22px;
+    min-height: 154px; overflow: hidden;
+    border: 1px solid var(--line-strong); border-radius: 8px;
+    background:
+      linear-gradient(120deg, rgba(247, 241, 226, .09), transparent 42%),
+      linear-gradient(145deg, rgba(56, 163, 255, .16), transparent 58%),
+      rgba(20, 22, 18, .92);
+    box-shadow: var(--shadow);
   }
-  .now-eyebrow { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; font-weight: 750; letter-spacing: .08em; text-transform: uppercase; }
-  .live-badge { display: inline-flex; align-items: center; gap: 5px; background: var(--danger); color: #fff; font-size: 11px; font-weight: 800; letter-spacing: .08em; padding: 3px 8px; border-radius: 6px; }
-  .now-title { min-height: 31px; overflow-wrap: anywhere; font-size: 25px; line-height: 1.18; font-weight: 720; margin-top: 4px; }
-  .now-sub { min-height: 20px; color: var(--muted); font-size: 14px; overflow-wrap: anywhere; }
+  .hero::after {
+    content: ""; position: absolute; inset: auto 0 0 0; height: 3px;
+    background: linear-gradient(90deg, var(--accent), var(--gold), var(--accent-2));
+  }
+  .np-art {
+    position: absolute; right: 18px; top: 18px; width: 96px; height: 96px;
+    border-radius: 8px; object-fit: cover; box-shadow: var(--shadow);
+    border: 1px solid var(--line); background: var(--surface-2);
+  }
+  .hero.has-art .now-title, .hero.has-art .now-sub { padding-right: 116px; }
+  .now-eyebrow { display: flex; align-items: center; gap: 8px; color: var(--gold); font-size: 11px; font-weight: 850; letter-spacing: .13em; text-transform: uppercase; }
+  .live-badge { display: inline-flex; align-items: center; gap: 5px; background: var(--danger); color: #fff; font-size: 11px; font-weight: 850; letter-spacing: .1em; padding: 3px 8px; border-radius: 6px; }
+  .now-title { min-height: 36px; overflow-wrap: anywhere; font-size: 32px; line-height: 1.08; font-weight: 850; margin-top: 4px; max-width: 820px; }
+  .now-sub { min-height: 22px; color: var(--muted); font-size: 15px; overflow-wrap: anywhere; }
 
   .progress { height: 6px; border-radius: 999px; background: var(--surface-3); overflow: hidden; margin-top: 14px; }
-  .progress .bar { height: 100%; width: 0; background: var(--accent); transition: width .6s linear; }
+  .progress .bar { height: 100%; width: 0; background: linear-gradient(90deg, var(--accent), var(--accent-2)); transition: width .6s linear; }
   .times { display: flex; justify-content: space-between; margin-top: 6px; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
 
-  .transport { display: flex; gap: 8px; margin-top: 14px; }
-  .transport button { flex: 1; min-width: 0; min-height: 52px; border-radius: 8px; background: var(--surface-2); font-size: 15px; font-weight: 750; transition: background .12s ease, transform .08s ease; }
-  .transport button:hover { background: var(--surface-3); }
+  .transport { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; margin-top: 14px; }
+  .transport button { min-width: 0; min-height: 52px; border-radius: 8px; background: var(--surface-2); font-size: 15px; font-weight: 800; transition: background .12s ease, transform .08s ease, border-color .12s ease; }
+  .transport button:hover { background: var(--surface-3); border-color: var(--line-strong); }
   .transport button:active { transform: translateY(1px); }
-  .transport .pp { flex: 1.5; background: var(--fg); color: #111318; }
-  .transport2 { display: flex; gap: 8px; margin-top: 8px; }
-  .transport2 button { flex: 1; min-height: 46px; border-radius: 8px; background: var(--surface-2); font-size: 14px; font-weight: 700; }
-  .transport2 .stop { background: #43262b; color: #ffd8dc; }
+  .transport .pp { background: var(--fg); color: var(--ink); }
+  .transport2 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 8px; }
+  .transport2 button { min-height: 46px; border-radius: 8px; background: var(--surface-2); font-size: 14px; font-weight: 800; }
+  .transport2 .stop { background: rgba(102, 33, 34, .78); color: #ffe2df; }
 
-  .layout { display: grid; grid-template-columns: minmax(310px, 390px) minmax(0, 1fr); gap: 14px; align-items: start; margin-top: 14px; }
-  .stack { display: grid; gap: 14px; }
+  .layout { display: grid; grid-template-columns: minmax(330px, 420px) minmax(0, 1fr); gap: 14px; align-items: start; margin-top: 14px; }
+  .stack { display: grid; gap: 14px; min-width: 0; }
 
-  .panel { border: 1px solid var(--line); border-radius: 8px; background: var(--surface); overflow: hidden; }
-  .panel-head { display: flex; justify-content: space-between; gap: 12px; align-items: center; min-height: 48px; padding: 13px 14px; border-bottom: 1px solid var(--line); }
-  .panel-title { margin: 0; font-size: 13px; font-weight: 750; letter-spacing: .06em; text-transform: uppercase; }
+  .panel {
+    border: 1px solid var(--line); border-radius: 8px;
+    background: var(--surface); overflow: hidden; box-shadow: var(--soft-shadow);
+    backdrop-filter: blur(18px);
+  }
+  .panel-head { display: flex; justify-content: space-between; gap: 12px; align-items: center; min-height: 48px; padding: 13px 14px; border-bottom: 1px solid var(--line); background: rgba(255, 255, 255, .025); }
+  .panel-title { margin: 0; font-size: 12px; font-weight: 850; letter-spacing: .11em; text-transform: uppercase; }
   .panel-note { color: var(--dim); font-size: 12px; text-align: right; }
   .panel-body { padding: 14px; }
 
   .remote { display: grid; gap: 12px; }
   .dpad {
-    width: min(100%, 308px); aspect-ratio: 1; justify-self: center;
+    width: min(100%, 326px); aspect-ratio: 1; justify-self: center;
     display: grid; grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(3, 1fr);
-    gap: 8px; padding: 8px; border-radius: 8px; background: var(--surface-2);
+    gap: 8px; padding: 10px; border-radius: 8px;
+    background: linear-gradient(145deg, rgba(247, 241, 226, .07), rgba(0, 0, 0, .12)), var(--surface-2);
+    border: 1px solid var(--line);
   }
   .dpad button, .control-grid button, .pair-actions button {
     min-height: 52px; border-radius: 8px; background: var(--surface-2);
     transition: background .12s ease, transform .08s ease, border-color .12s ease;
   }
   .dpad button { display: grid; place-items: center; font-size: 25px; }
-  .dpad .select { background: var(--fg); color: #111318; font-size: 14px; font-weight: 800; }
-  button:hover { background: var(--surface-3); }
+  .dpad .select { background: var(--fg); color: var(--ink); font-size: 14px; font-weight: 900; }
+  button:hover { background: var(--surface-3); border-color: var(--line-strong); }
   button:active { transform: translateY(1px); }
 
   .control-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
-  .control-grid button { padding: 10px 8px; font-size: 14px; font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .control-grid button { padding: 10px 8px; font-size: 14px; font-weight: 750; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
   .tv-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
-  .tv-grid button { min-height: 52px; border-radius: 8px; background: var(--surface-2); font-size: 13px; font-weight: 700; padding: 8px 6px; white-space: nowrap; }
+  .tv-grid button { min-height: 52px; border-radius: 8px; background: var(--surface-2); font-size: 13px; font-weight: 850; padding: 8px 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-  .tv-grid button.active { background: var(--accent) !important; color: #fff !important; border-color: var(--accent) !important; }
+  .tv-grid button.active, #sleep-grid button.active, .days button.on {
+    background: linear-gradient(135deg, var(--accent), #1e6fd0) !important;
+    color: #fff !important; border-color: rgba(255, 255, 255, .36) !important;
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .12), 0 10px 24px rgba(56, 163, 255, .18);
+  }
   .seg button { border: 1px solid var(--line); }
 
   /* --- Media lists --- */
   .music-results { display: grid; gap: 6px; max-height: 340px; overflow-y: auto; }
-  .music-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 9px 11px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); }
-  .music-row .m-title { font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .music-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 10px 11px; border: 1px solid var(--line); border-radius: 8px; background: rgba(255, 255, 255, .035); }
+  .music-row .m-title { font-weight: 750; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .music-row .m-sub { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .music-row button { min-height: 34px; padding: 5px 13px; border-radius: 8px; background: var(--accent); color: #fff; font-size: 12px; font-weight: 700; }
+  .music-row button { min-height: 34px; padding: 5px 13px; border-radius: 8px; background: var(--accent); color: #fff; font-size: 12px; font-weight: 850; }
   .music-stop { width: 100%; min-height: 44px; border-radius: 8px; margin-top: 10px; }
 
   /* --- Alarms --- */
   .alarms { display: grid; gap: 10px; }
-  .alarm { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 12px 13px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); }
+  .alarm { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 12px 13px; border: 1px solid var(--line); border-radius: 8px; background: rgba(255, 255, 255, .035); }
   .alarm.off { opacity: .55; }
-  .alarm .time { font-size: 23px; font-weight: 780; font-variant-numeric: tabular-nums; }
-  .alarm .label { font-weight: 650; overflow-wrap: anywhere; }
+  .alarm .time { font-size: 24px; font-weight: 900; font-variant-numeric: tabular-nums; color: var(--gold); }
+  .alarm .label { font-weight: 780; overflow-wrap: anywhere; }
   .alarm .meta { color: var(--muted); font-size: 12px; margin-top: 2px; }
   .alarm-actions { display: flex; gap: 6px; }
-  .alarm-actions button { min-height: 38px; padding: 6px 11px; border-radius: 8px; background: var(--surface-3); font-size: 12px; font-weight: 700; }
+  .alarm-actions button { min-height: 38px; padding: 6px 11px; border-radius: 8px; background: var(--surface-3); font-size: 12px; font-weight: 850; }
   .alarm-actions button.on { background: var(--accent-2); color: #fff; }
-  .alarm-actions button.del { background: #43262b; color: #ffd8dc; }
-  .add-alarm { width: 100%; min-height: 48px; border-radius: 8px; background: var(--surface-2); font-weight: 750; border: 1px dashed var(--line); }
-  .alarm-form { display: grid; gap: 11px; padding: 13px; border: 1px dashed var(--line); border-radius: 8px; background: var(--surface-2); }
-  .alarm-form label { display: grid; gap: 5px; font-size: 12px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--dim); }
-  .alarm-form input, .alarm-form select { min-height: 46px; border: 1px solid var(--line); border-radius: 8px; background: #0d0e11; color: var(--fg); padding: 0 11px; font-size: 15px; }
+  .alarm-actions button.del { background: rgba(102, 33, 34, .78); color: #ffe2df; }
+  .add-alarm { width: 100%; min-height: 48px; border-radius: 8px; background: transparent; font-weight: 850; border: 1px dashed var(--line-strong); }
+  .alarm-form { display: grid; gap: 11px; padding: 13px; border: 1px dashed var(--line-strong); border-radius: 8px; background: rgba(0, 0, 0, .12); }
+  .alarm-form label { display: grid; gap: 5px; font-size: 12px; font-weight: 850; letter-spacing: .06em; text-transform: uppercase; color: var(--dim); }
+  .alarm-form input, .alarm-form select { min-height: 46px; border: 1px solid var(--line); border-radius: 8px; background: rgba(7, 8, 6, .78); color: var(--fg); padding: 0 11px; font-size: 15px; }
   .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   .days { display: flex; gap: 5px; }
-  .days button { flex: 1; min-height: 40px; border-radius: 8px; background: var(--surface-3); font-size: 12px; font-weight: 800; }
-  .days button.on { background: var(--accent); color: #fff; }
+  .days button { flex: 1; min-height: 40px; border-radius: 8px; background: var(--surface-3); font-size: 12px; font-weight: 900; }
 
   .primary { background: var(--accent) !important; color: #fff; font-weight: 750; }
-  .danger { background: #4a252b !important; color: #ffd8dc; font-weight: 750; }
+  .danger { background: rgba(102, 33, 34, .88) !important; color: #ffe2df; font-weight: 750; }
   .secondary { background: var(--surface-2) !important; color: var(--fg); }
 
   .pairing { display: grid; gap: 14px; }
@@ -145,7 +195,7 @@
   .pair-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
   .pair-actions .full { grid-column: 1 / -1; }
   .pin-row { display: grid; grid-template-columns: minmax(0, 1fr); }
-  .pin-row input { width: 100%; min-height: 56px; border: 1px solid var(--line); border-radius: 8px; background: #0d0e11; color: var(--fg); font-size: 24px; font-weight: 700; letter-spacing: .24em; text-align: center; }
+  .pin-row input { width: 100%; min-height: 56px; border: 1px solid var(--line); border-radius: 8px; background: rgba(7, 8, 6, .78); color: var(--fg); font-size: 24px; font-weight: 800; letter-spacing: .24em; text-align: center; }
 
   .muted { color: var(--muted); font-size: 13px; }
   .hidden { display: none !important; }
@@ -153,21 +203,43 @@
   #toast {
     position: fixed; left: 50%; bottom: 16px; z-index: 20; width: max-content;
     max-width: calc(100% - 28px); transform: translateX(-50%) translateY(10px);
-    padding: 11px 14px; border: 1px solid var(--line); border-radius: 8px;
-    background: #252932; color: var(--fg); box-shadow: var(--shadow); font-size: 13px;
+    padding: 11px 14px; border: 1px solid var(--line-strong); border-radius: 8px;
+    background: rgba(18, 20, 16, .96); color: var(--fg); box-shadow: var(--shadow); font-size: 13px;
     opacity: 0; pointer-events: none; transition: opacity .16s ease, transform .16s ease;
   }
   #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 
+  @media (min-width: 900px) {
+    .layout > .stack:first-child {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .layout > .stack:first-child > .panel:first-child,
+    .layout > .stack:first-child > .panel:nth-child(4),
+    .layout > .stack:first-child > .panel:nth-child(5) {
+      grid-column: 1 / -1;
+    }
+  }
   @media (max-width: 760px) {
     .shell { padding-inline: 12px; padding-bottom: 22px; }
     .topbar { grid-template-columns: 1fr; gap: 10px; }
-    h1 { font-size: 25px; }
+    h1 { font-size: 26px; }
     .status-pill { justify-self: start; }
     .layout { grid-template-columns: 1fr; }
+    .hero { padding: 18px; min-height: 138px; }
+    .np-art { width: 76px; height: 76px; }
+    .hero.has-art .now-title, .hero.has-art .now-sub { padding-right: 92px; }
+    .now-title { font-size: 25px; }
     .panel-head { align-items: flex-start; flex-direction: column; gap: 3px; }
     .panel-note { text-align: left; }
     .tv-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .transport { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .transport .pp { grid-column: 1 / -1; grid-row: 1; }
+    .transport2 { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 460px) {
+    /* narrow phones: give the alarm label room; actions drop to their own row */
+    .alarm { grid-template-columns: auto minmax(0, 1fr); }
+    .alarm-actions { grid-column: 1 / -1; justify-content: flex-end; }
   }
   @media (max-width: 390px) {
     .control-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -190,6 +262,7 @@
 
   <!-- Now playing on the TV (Pi HDMI first; Apple TV metadata as fallback) -->
   <section class="hero" aria-live="polite">
+    <img id="np-art" class="np-art hidden" alt="">
     <div class="now-eyebrow"><span id="np-eyebrow">Now Playing</span></div>
     <div class="now-title" id="np-title">Connecting</div>
     <div class="now-sub" id="np-sub"></div>
@@ -207,7 +280,18 @@
     <div class="transport2 hidden" id="transport2">
       <button id="np-skip" class="secondary hidden">⤵ Skip</button>
       <button id="np-cc" class="secondary">CC · Subtitles</button>
+      <button id="np-audio" class="secondary hidden">🔉 Audio</button>
       <button id="np-stop" class="stop">■ Stop</button>
+    </div>
+    <div class="transport2 hidden" id="media-nav">
+      <button id="ch-prev" class="secondary">« Chapter</button>
+      <button id="ch-next" class="secondary">Chapter »</button>
+      <button id="file-next" class="secondary">⏭ Next file</button>
+    </div>
+    <div class="transport2 hidden" id="queue-row">
+      <button id="q-prev" class="secondary">⏮ Prev</button>
+      <button id="q-next" class="secondary">⏭ Next</button>
+      <button id="q-stop" class="stop">■ Stop queue</button>
     </div>
   </section>
 
@@ -248,6 +332,7 @@
           </div>
           <button id="w-music" class="secondary" data-watch="music" style="width:100%;margin-top:8px">🎵 Play Apple Music (Apple TV)</button>
           <div id="library-controls" class="hidden">
+            <div class="music-results hidden" id="resume-list" style="margin-top:10px"></div>
             <div class="music-results" id="media-list" style="margin-top:10px"><span class="muted">Loading…</span></div>
             <button id="w-shuffle" class="secondary music-stop">🔀 Shuffle library</button>
           </div>
@@ -273,6 +358,22 @@
             <button data-cec="/tv/volume/down">Vol −</button>
             <button data-cec="/tv/volume/up">Vol +</button>
             <button data-cec="/tv/volume/mute">Mute</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Sleep timer: stop playback + everything off after a delay -->
+      <section class="panel">
+        <div class="panel-head">
+          <h2 class="panel-title">Sleep Timer</h2>
+          <div class="panel-note" id="sleep-note">Off</div>
+        </div>
+        <div class="panel-body">
+          <div class="tv-grid" id="sleep-grid" style="grid-template-columns:repeat(4,minmax(0,1fr))">
+            <button data-sleep="30">30 min</button>
+            <button data-sleep="60">1 h</button>
+            <button data-sleep="90">1.5 h</button>
+            <button data-sleep="0">Cancel</button>
           </div>
         </div>
       </section>
@@ -350,6 +451,19 @@
     </div>
 
     <div class="stack">
+      <!-- System health: which link in the chain is broken, at a glance -->
+      <section class="panel">
+        <div class="panel-head">
+          <h2 class="panel-title">System</h2>
+          <div class="panel-note" id="health-note">…</div>
+        </div>
+        <div class="panel-body">
+          <div class="music-results" id="health-list" style="max-height:none">
+            <span class="muted">Checking…</span>
+          </div>
+        </div>
+      </section>
+
       <section class="panel">
         <div class="panel-head">
           <h2 class="panel-title">Apple TV Remote</h2>
@@ -548,9 +662,15 @@ function renderAlarms(list) {
   });
 }
 
+// refresh() re-polls alarms every cycle; only touch the DOM when the data
+// actually changed, so in-flight button states ("Testing…") survive the poll.
+let alarmsSig = null;
 async function loadAlarms() {
   const result = await api('GET', '/api/alarms');
-  if (!result.ok) { $('#alarms').innerHTML = '<span class="muted">Alarms unavailable</span>'; return; }
+  if (!result.ok) { alarmsSig = null; $('#alarms').innerHTML = '<span class="muted">Alarms unavailable</span>'; return; }
+  const sig = JSON.stringify(result.data);
+  if (sig === alarmsSig) return;
+  alarmsSig = sig;
   renderAlarms(result.data);
 }
 
@@ -609,12 +729,21 @@ $('#alarm-form').addEventListener('submit', async event => {
 function setWatchActive(kind) {
   $$('[data-watch]').forEach(b => b.classList.toggle('active', b.dataset.watch === kind));
 }
+// The user explicitly opened the library to browse — the 4s status poll must
+// NOT close it under their finger just because something is playing. Pinned
+// until they pick another watch mode themselves.
+let libraryPinned = false;
 function showLibrary(show) {
   $('#library-controls').classList.toggle('hidden', !show);
   if (show && !mediaLoaded) loadMedia('');
+  if (show) loadResume();
+}
+function autoLibrary(show) {  // poll-driven visibility: respects the pin
+  if (!libraryPinned) showLibrary(show);
 }
 $('#w-live').addEventListener('click', async () => {
   setWatchActive('livestream');
+  libraryPinned = false;
   showLibrary(false);
   toast('Starting livestream on the TV…');
   const r = await api('POST', '/api/screen/livestream');
@@ -622,10 +751,12 @@ $('#w-live').addEventListener('click', async () => {
 });
 $('#w-library').addEventListener('click', async () => {
   setWatchActive('library');
+  libraryPinned = true;
   showLibrary(true);
 });
 $('#w-shuffle').addEventListener('click', async () => {
   setWatchActive('library');
+  libraryPinned = true;
   showLibrary(true);
   toast('Shuffling your library…');
   const r = await api('POST', '/api/media/shuffle', { path: mediaPath });
@@ -633,6 +764,7 @@ $('#w-shuffle').addEventListener('click', async () => {
 });
 $('#w-dash').addEventListener('click', async () => {
   setWatchActive('dashboard');
+  libraryPinned = false;
   showLibrary(false);
   toast('Back to the dashboard');
   await api('POST', '/api/screen/stop');
@@ -640,7 +772,9 @@ $('#w-dash').addEventListener('click', async () => {
   await refreshInput();
 });
 $('#w-appletv').addEventListener('click', async () => {
-  setWatchActive('appletv'); showLibrary(false);
+  setWatchActive('appletv');
+  libraryPinned = false;
+  showLibrary(false);
   toast('Switching to the Apple TV');
   await api('POST', '/api/input/appletv');
   await refreshInput();
@@ -684,22 +818,139 @@ function fmtT(s) {
   const p = n => String(n).padStart(2, '0');
   return h ? (h + ':' + p(m) + ':' + p(ss)) : (m + ':' + p(ss));
 }
-function showTransport(kind) {  // '', 'media', 'live'
-  const media = kind === 'media', live = kind === 'live';
+function showTransport(kind) {  // '', 'media', 'live', 'queue'
+  const media = kind === 'media', live = kind === 'live', queue = kind === 'queue';
   $('#np-progress').classList.toggle('hidden', !media);
   $('#np-times').classList.toggle('hidden', !media);
   $('#transport').classList.toggle('hidden', !media);          // seek + pause: media only
   $('#transport2').classList.toggle('hidden', !(media || live)); // stop row: any playback
+  $('#queue-row').classList.toggle('hidden', !queue);          // plex queue controls
+  $('#media-nav').classList.toggle('hidden', !media);          // chapters + next episode
   $('#np-cc').classList.toggle('hidden', !media);              // subtitles: media only
+  $('#np-audio').classList.toggle('hidden', !media);           // audio track: media only
   // Skip only renders while live AND the hub is wired for it. showTransport runs
   // every refresh so this picks up late capability loads (initial /capabilities
   // fetch races with the first status poll) without a separate timer.
   $('#np-skip').classList.toggle('hidden', !(live && jetstreamCaps.skip));
 }
+
+/* --- now-playing artwork (Apple TV metadata; cached server-side by id) --- */
+let lastArtSig = '';
+const npArt = $('#np-art');
+npArt.onload = () => { npArt.classList.remove('hidden'); $('.hero').classList.add('has-art'); };
+npArt.onerror = () => { npArt.classList.add('hidden'); $('.hero').classList.remove('has-art'); };
+function setArtwork(sig) {
+  if (!sig) {
+    lastArtSig = '';
+    npArt.classList.add('hidden');
+    $('.hero').classList.remove('has-art');
+    return;
+  }
+  if (sig === lastArtSig) return;
+  lastArtSig = sig;
+  npArt.src = '/api/atv/artwork?v=' + encodeURIComponent(sig);  // v busts stale img cache per track
+}
+
+/* --- plex queue transport --- */
+$('#q-next').addEventListener('click', async () => { await api('POST', '/api/plex/queue/next'); setTimeout(refresh, 400); });
+$('#q-prev').addEventListener('click', async () => { await api('POST', '/api/plex/queue/prev'); setTimeout(refresh, 400); });
+$('#q-stop').addEventListener('click', async () => { toast('Stopping queue'); await api('POST', '/api/plex/stop'); setTimeout(refresh, 400); });
+
+/* --- sleep timer --- */
+async function refreshSleep() {
+  const r = await api('GET', '/api/sleep-timer');
+  const active = r.ok && r.data && r.data.active;
+  $('#sleep-note').textContent = active
+    ? ('💤 off in ' + Math.max(1, Math.round(r.data.remaining / 60)) + ' min') : 'Off';
+  $$('#sleep-grid button').forEach(b =>
+    b.classList.toggle('active', !!active && b.dataset.sleep !== '0'));
+}
+$$('#sleep-grid button').forEach(b => b.addEventListener('click', async () => {
+  const mins = Number(b.dataset.sleep);
+  if (!mins) {
+    await api('DELETE', '/api/sleep-timer');
+    toast('Sleep timer cancelled');
+  } else {
+    const r = await api('POST', '/api/sleep-timer', { minutes: mins });
+    toast(r.ok ? ('💤 Everything off in ' + mins + ' min') : 'Sleep timer failed');
+  }
+  refreshSleep();
+}));
+
+/* --- system health --- */
+const HEALTH_LABEL = { appletv: 'Apple TV', cec: 'TV control (CEC)', screen: 'Screen player', plex: 'Plex' };
+async function refreshHealth() {
+  const r = await api('GET', '/api/health');
+  const node = $('#health-list');
+  if (!r.ok || !r.data) { $('#health-note').textContent = 'unavailable'; return; }
+  const d = r.data;
+  $('#health-note').textContent = d.ok ? 'All good' : 'Attention';
+  node.innerHTML = '';
+  Object.entries(d.services || {}).forEach(([name, svc]) => {
+    const row = document.createElement('div');
+    row.className = 'music-row';
+    const detail = svc.ok
+      ? (name === 'cec' ? ('TV ' + (svc.tv_power || '?')) : name === 'plex' ? (svc.sections + ' library') : 'OK')
+      : (svc.error || 'unreachable');
+    row.innerHTML = '<div><div class="m-title"><span class="dot ' + (svc.ok ? 'ok' : 'bad')
+      + '" style="display:inline-block;margin-right:8px"></span>' + esc(HEALTH_LABEL[name] || name)
+      + '</div><div class="m-sub">' + esc(String(detail)) + '</div></div>';
+    node.appendChild(row);
+  });
+  const s = d.system || {};
+  const bits = [];
+  if (s.cpu_temp_c != null) bits.push(s.cpu_temp_c + '°C');
+  if (s.disk_used_pct != null) bits.push('disk ' + s.disk_used_pct + '%');
+  if (s.load_1m != null) bits.push('load ' + s.load_1m);
+  if (s.uptime_days != null) bits.push('up ' + s.uptime_days + 'd');
+  if (bits.length) {
+    const row = document.createElement('div');
+    row.className = 'music-row';
+    row.innerHTML = '<div><div class="m-title">Pi</div><div class="m-sub">' + esc(bits.join(' · ')) + '</div></div>';
+    node.appendChild(row);
+  }
+}
+
+/* --- continue watching (mpv resume points) --- */
+let resumeSig = null;   // only touch the DOM on change, so taps aren't swallowed
+async function loadResume() {
+  const node = $('#resume-list');
+  const r = await api('GET', '/api/media/resume');
+  const entries = (r.ok && r.data && r.data.entries) || [];
+  const sig = JSON.stringify(entries);
+  if (sig === resumeSig) return;
+  resumeSig = sig;
+  if (!entries.length) { node.classList.add('hidden'); node.innerHTML = ''; return; }
+  node.innerHTML = '';
+  entries.forEach(e => {
+    const row = document.createElement('div');
+    row.className = 'music-row';
+    row.innerHTML = '<div><div class="m-title">⏯ ' + esc(e.name) + '</div>'
+      + '<div class="m-sub">Continue at ' + fmtT(e.position) + '</div></div>';
+    const b = document.createElement('button');
+    b.textContent = 'Resume';
+    b.onclick = async () => {
+      toast('Resuming ' + e.name);
+      const x = await api('POST', '/api/media/play', { path: e.path });
+      if (!x.ok) toast(x.data?.error || 'play failed');
+    };
+    row.appendChild(b);
+    node.appendChild(row);
+  });
+  node.classList.remove('hidden');
+}
 $$('#transport [data-seek]').forEach(b => b.addEventListener('click', () => screenControl('seek', Number(b.dataset.seek))));
 $('#pp').addEventListener('click', async () => { await screenControl('pause'); setTimeout(refresh, 200); });
 $('#np-stop').addEventListener('click', async () => { toast('Stopping'); await api('POST', '/api/screen/stop'); await api('POST', '/api/jetstream/stop'); });
 $('#np-cc').addEventListener('click', async () => { toast('Subtitles: cycling'); await api('POST', '/api/media/subtitles'); });
+$('#np-audio').addEventListener('click', async () => { toast('Audio: next track'); await api('POST', '/api/screen/control', { action: 'audio' }); });
+$('#ch-prev').addEventListener('click', () => api('POST', '/api/screen/control', { action: 'chapter', n: -1 }));
+$('#ch-next').addEventListener('click', () => api('POST', '/api/screen/control', { action: 'chapter', n: 1 }));
+$('#file-next').addEventListener('click', async () => {
+  const r = await api('POST', '/api/media/next');
+  toast(r.ok ? '⏭ Playing next file' : (r.data?.error || 'No next file'));
+  setTimeout(refresh, 500);
+});
 
 /* --- jetstream Skip (Phase 6): same-LAN proxy of the regular viewer skip.
    The hub only advertises the button when /capabilities says skip is wired, so a
@@ -843,6 +1094,7 @@ async function refresh() {
     $('#controls').classList.add('hidden');
     $('#np-title').textContent = info.reachable ? 'Apple TV needs pairing' : 'Apple TV is asleep or unreachable';
     $('#np-sub').textContent = '';
+    setArtwork('');
     setStatus(info.reachable ? '' : 'bad', info.reachable ? 'Setup needed' : 'Unreachable');
     return;
   }
@@ -862,11 +1114,12 @@ async function refresh() {
   window._wasScreenPlaying = screenPlaying;
 
   if (screenPlaying) {
+    setArtwork('');
     const u = decodeURIComponent(sd.url);
     const isLive = sd.profile === 'live' || /\.m3u8|live\.thelunadog/i.test(u);
     if (isLive) {
       setWatchActive('livestream');
-      showLibrary(false);
+      autoLibrary(false);
       $('#np-eyebrow').innerHTML = '<span class="live-badge">● LIVE</span>';
       $('#np-title').textContent = sd.title || 'Jetstream livestream';
       $('#np-sub').textContent = sd.subtitle || 'On the TV (Pi)';
@@ -895,9 +1148,24 @@ async function refresh() {
     return;
   }
 
+  // A Plex playlist queue AirPlaying to the Apple TV?
+  const q = await api('GET', '/api/plex/queue');
+  const qd = q.ok ? (q.data || {}) : {};
+  if (qd.active) {
+    setWatchActive('music');
+    autoLibrary(false);
+    $('#np-eyebrow').textContent = 'Plex Music';
+    $('#np-title').textContent = (qd.track && qd.track.title) || qd.label || 'Plex queue';
+    $('#np-sub').textContent = [qd.track && qd.track.artist, qd.track && qd.track.album]
+      .filter(Boolean).join(' · ') + ' · ' + (qd.index + 1) + '/' + qd.total;
+    showTransport('queue');
+    setArtwork('plex|' + ((qd.track && qd.track.title) || qd.index));
+    return;
+  }
+
   // Nothing on the Pi's HDMI. Either the Apple TV is the active input, or the
   // idle dashboard is showing.
-  showLibrary(false);
+  autoLibrary(false);
   showTransport('');
   if (activeInput === 'appletv') {
     const state = await api('GET', '/api/atv/state');
@@ -908,25 +1176,35 @@ async function refresh() {
       $('#np-eyebrow').textContent = 'Apple Music';
       $('#np-title').textContent = d.title || 'Apple Music';
       $('#np-sub').textContent = [d.artist, d.album].filter(Boolean).join(' · ') || 'On the Apple TV';
+      setArtwork(d.title ? ('music|' + d.title + '|' + (d.artist || '')) : '');
     } else {
       setWatchActive('appletv');        // just on the Apple TV -> highlight it
       $('#np-eyebrow').textContent = 'Apple TV';
       $('#np-title').textContent = 'Apple TV';
       $('#np-sub').textContent = d.title ? [d.title, d.app].filter(Boolean).join(' · ') : 'On the TV';
+      setArtwork(d.title ? ('atv|' + d.title) : '');
     }
   } else {
     setWatchActive('dashboard');
-    $('#np-eyebrow').textContent = 'Dashboard';
-    $('#np-title').textContent = 'Dashboard';
-    $('#np-sub').textContent = 'Idle — showing the living-room dashboard';
+    $('#np-eyebrow').textContent = 'Now Playing';
+    $('#np-title').textContent = 'Nothing playing';
+    $('#np-sub').textContent = 'The TV is on the ambient dashboard';
+    setArtwork('');
   }
 }
 
 // Load jetstream capabilities before the first refresh so the Skip button's
 // show/hide state is right on first paint (showTransport reads jetstreamCaps).
-(async () => { await loadJetstreamCaps(); refresh(); refreshTvState(); })();
-setInterval(refresh, 4000);
-setInterval(refreshTvState, 10000);
+(async () => { await loadJetstreamCaps(); refresh(); refreshTvState(); refreshSleep(); refreshHealth(); })();
+// Poll only while the app is visible — a backgrounded phone tab shouldn't keep
+// the hub, the Apple TV, and CEC busy (or spam the hub's access log).
+setInterval(() => { if (!document.hidden) refresh(); }, 4000);
+setInterval(() => { if (!document.hidden) refreshTvState(); }, 10000);
+setInterval(() => { if (!document.hidden) refreshSleep(); }, 15000);
+setInterval(() => { if (!document.hidden) refreshHealth(); }, 60000);
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) { refresh(); refreshTvState(); refreshSleep(); refreshHealth(); }
+});
 </script>
 </body>
 </html>

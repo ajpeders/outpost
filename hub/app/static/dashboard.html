@@ -141,6 +141,13 @@ let LAT = Number(params.get('lat')) || 39.7392;
 let LON = Number(params.get('lon')) || -104.9903;
 let CITY = params.get('city') || '';   // fallback; auto-detected below
 const WEATHER_CACHE_KEY = 'livingroom-dashboard-weather-v2';
+const GEO_CACHE_KEY = 'livingroom-dashboard-geo-v1';
+// Overlay mode reloads this page every minute (headless chromium render), so
+// external lookups must be cache-first: geolocation for a day, weather for
+// 10 minutes. Without this every render re-hits ip-api + open-meteo and the
+// render stalls on the network inside its virtual-time budget.
+const GEO_TTL = 24 * 60 * 60 * 1000;
+const WEATHER_FRESH = 10 * 60 * 1000;
 // simplistic monochrome (white) line icons — no color emoji
 const ICONS = {
   sun:'<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.6v2.5M12 18.9v2.5M4.6 4.6l1.8 1.8M17.6 17.6l1.8 1.8M2.6 12h2.5M18.9 12h2.5M4.6 19.4l1.8-1.8M17.6 6.4l1.8-1.8"/></svg>',
@@ -211,8 +218,21 @@ tick(); setInterval(tick, 1000);
 async function geolocate() {
   if (params.has('lat') && params.has('lon')) return;
   try {
+    const c = JSON.parse(localStorage.getItem(GEO_CACHE_KEY) || 'null');
+    if (c && c.lat && c.lon && Date.now() - c.savedAt < GEO_TTL) {
+      LAT = c.lat; LON = c.lon; CITY = c.city || CITY;
+      return;
+    }
+  } catch (e) {}
+  try {
     const g = await fetchJson('http://ip-api.com/json/', 3000);
-    if (g && g.lat && g.lon) { LAT = g.lat; LON = g.lon; CITY = g.city || CITY; }
+    if (g && g.lat && g.lon) {
+      LAT = g.lat; LON = g.lon; CITY = g.city || CITY;
+      try {
+        localStorage.setItem(GEO_CACHE_KEY, JSON.stringify(
+          { savedAt: Date.now(), lat: LAT, lon: LON, city: CITY }));
+      } catch (e) {}
+    }
   } catch (e) {}
 }
 function renderWeather(r, city) {
@@ -235,16 +255,34 @@ function renderWeather(r, city) {
   }
   el.forecast.replaceChildren(frag);
 }
+function cachedWeather() {
+  try { return JSON.parse(localStorage.getItem(WEATHER_CACHE_KEY) || 'null'); }
+  catch (e) { return null; }
+}
 function renderCachedWeather() {
-  try {
-    const cached = JSON.parse(localStorage.getItem(WEATHER_CACHE_KEY) || 'null');
-    if (cached && cached.data && Date.now() - cached.savedAt < 6 * 60 * 60 * 1000) {
-      renderWeather(cached.data, cached.city || CITY);
-    }
-  } catch (e) {}
+  const cached = cachedWeather();
+  if (cached && cached.data && Date.now() - cached.savedAt < 6 * 60 * 60 * 1000) {
+    renderWeather(cached.data, cached.city || CITY);
+  }
 }
 async function weather() {
+  const cached = cachedWeather();
+  if (cached && cached.data && Date.now() - cached.savedAt < WEATHER_FRESH) return;
+  // Preferred: the hub's /api/weather — same-origin, server-side cached, works
+  // with the internet down. The direct open-meteo path stays as a fallback for
+  // dashboards served by an older hub.
   try {
+    const q = params.has('lat') && params.has('lon') ? `?lat=${LAT}&lon=${LON}` : '';
+    const r = await fetchJson('/api/weather' + q, 7000);
+    if (r && r.data && r.data.current) {
+      if (r.city) CITY = r.city;
+      renderWeather(r.data, CITY);
+      localStorage.setItem(WEATHER_CACHE_KEY, JSON.stringify({ savedAt: Date.now(), city: CITY, data: r.data }));
+      return;
+    }
+  } catch (e) {}
+  try {
+    await geolocate();
     const u = `https://api.open-meteo.com/v1/forecast?latitude=${LAT}&longitude=${LON}` +
       `&current=temperature_2m,weather_code&daily=weather_code,temperature_2m_max,temperature_2m_min` +
       `&temperature_unit=fahrenheit&timezone=auto&forecast_days=7`;
@@ -254,7 +292,7 @@ async function weather() {
   } catch (e) {}
 }
 renderCachedWeather();
-(async () => { await geolocate(); weather(); })();
+weather();
 setInterval(weather, 15 * 60 * 1000);
 
 // ---- now playing (same-origin hub) ----
