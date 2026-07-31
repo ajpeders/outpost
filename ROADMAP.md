@@ -129,16 +129,70 @@ the TV set (CEC), hosts the hub app, and runs scheduled automations.
 - Deployed with hub rebuild; `/healthz`, `/api/health`, `/api/screen/status`,
   and the root page all verified after deploy.
 
+## Speed + homelab round (2026-07-31) ✅ *(built + deployed)*
+
+- **Instant TV input switching** — switching to the Apple TV used to *release*
+  the Pi's active-source claim and wait for tvOS to grab the input (5-10 s, and
+  it stalled outright if the ATV was already awake). Now the hub sends CEC **Set
+  Stream Path** straight to the ATV's HDMI port (`ATV_HDMI_INPUT`, default 3, via
+  the screen player's `/tv/input`) and wakes the ATV in parallel. Measured
+  **~0.8 s** both directions; `play_on_atv` and the Apple Music one-tap use the
+  same path.
+- **Homelab stats on the TV dashboard** — `/api/homelab` gained an SSH probe
+  (load→CPU%, RAM%, media-pool disk, hottest sensor) alongside the existing
+  latency / Plex-sessions / jetstream-live info. `openssh-client` in the hub
+  image, `~/.ssh` mounted read-only at `/ssh`, `HOMELAB_SSH` env (empty disables
+  it). Overlay line reads e.g. `isis · 15ms · cpu 16% · ram 51% · 1.8/4.5T · 37°
+  · Plex idle · ● <live title>`.
+- **Wifi drop fix** — the Pi kept becoming unreachable over SSH until a reboot:
+  `wlan0` power-save was **on** (the brcmfmac radio naps through inbound
+  traffic). Disabled live and persistently via
+  `/etc/NetworkManager/conf.d/wifi-powersave-off.conf` (`wifi.powersave = 2`).
+  The journal is now persistent (`/var/log/journal`) so a recurrence leaves
+  evidence; PSU is clean (`throttled=0x0`). Pi is wifi-only — ethernet or a DHCP
+  reservation for .220 would make it bulletproof.
+
+## Play on Apple TV via Plex (2026-07-31) 🟡 *(built + deployed, blocked on one toggle)*
+
+Real 4K HDR/DV playback path: the Pi's V3D can't scan out 10-bit HDR above
+1080p, so `screen_player` downshifts those files. This hands the *same library
+file* to the Apple TV's Plex app instead, which decodes 4K DV natively.
+
+- `POST /api/plex/play_on_atv {path}` + a per-file **ATV** button in the library
+  UI. Resolves a share-relative path → Plex `ratingKey` (exact Part-file match,
+  then basename, then movie-folder name; 10-min cache), forces the TV to the ATV
+  input, launches Plex, waits for the client, sends `playMedia` directly to it.
+- **Blocked:** the Plex tvOS app must have **Settings → Advertise as Player**
+  enabled once, with the remote. Until then the endpoint 504s with that hint.
+- Ruled out while trying to automate it: the app is running and signed in as the
+  same account as `PLEX_TOKEN` (not an account mismatch); server `/clients` and
+  `plex.tv/api/v2/resources` both show no player, so it genuinely isn't
+  advertising; launching the app doesn't enable it; and a
+  `plex://preplay?metadataKey=…` deep link through the new
+  `POST :8010/api/open_url` (pyatv accepts a URL in place of a bundle id) is
+  taken by tvOS but ignored by the Plex app — nothing reaches the server.
+- Debugging channel that works: the Plex server log on isis shows exactly what
+  the ATV app requests —
+  `docker exec plex sh -c "grep -a 192.168.0.39 '/config/…/Logs/Plex Media Server.log'"`.
+  (pyatv `/api/state` reports the *now-playing* app, not the foreground one, so
+  it can't confirm a launch.)
+- Library note: `_4k_archive` REMUXes weren't Plex-indexed, so the folder
+  fallback played the 1080p copy. Marty Supreme's REMUX was moved into
+  `movies/` **server-side** (the Pi's `/mnt/share` CIFS mount is read-only) and
+  Plex rescanned — it's now a 4K + 1080p version pair and resolves as 4k.
+  `_4k_archive` is empty; put future 4K rips straight into `movies/`.
+
 ## Current Priorities
 
-1. **Phase 7: Plex alarm source** — add a Plex album/playlist picker to the
+1. **Finish the ATV Plex path** — flip Advertise as Player on the Apple TV, then
+   run the first end-to-end `play_on_atv` (see section above; everything else is
+   built and verified).
+2. **Phase 7: Plex alarm source** — add a Plex album/playlist picker to the
    alarm editor and fire it through the existing Plex queue/AirPlay path.
-2. **Real-listening validation** — exercise Plex queue next/prev/stop and Apple
+   *(User: skipped for now.)*
+3. **Real-listening validation** — exercise Plex queue next/prev/stop and Apple
    TV artwork during a real playlist session; ROADMAP still calls these out as
    verify-needed.
-3. **Dashboard polish pass** — after the controller overhaul, apply the same
-   visual discipline to the TV dashboard overlay: typography, spacing, and
-   now-playing/alarm hierarchy over aerials.
 4. **Presence automation spike** — Hailo/person-detection remains the most
    valuable Pi-native future item once the room-control surface settles.
 
