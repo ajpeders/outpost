@@ -97,7 +97,7 @@
   .alarm-next { font-size: 1.5vw; font-weight: 600; margin-top: 1.2vh; }
   .alarm-next .t { font-weight: 700; }
   .homelab { font-size: 1.3vw; font-weight: 600; margin-top: 1vh; opacity: .9;
-             max-width: 44vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+             max-width: 54vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .homelab .sep { opacity: .55; margin: 0 .4em; }
   .homelab .live-dot { display: inline-block; width: .55em; height: .55em; border-radius: 50%;
                        background: #ff5252; margin-right: .3em; vertical-align: .05em;
@@ -489,7 +489,15 @@ async function homelabStatus() {
     box.appendChild(document.createTextNode(name));
     if (h.latency_ms != null) {
       box.appendChild(sep());
-      box.appendChild(document.createTextNode(h.latency_ms + ' ms'));
+      box.appendChild(document.createTextNode(Math.round(h.latency_ms) + 'ms'));
+    }
+    if (h.stats && h.stats.ok) {
+      const s = h.stats;
+      for (const txt of ['cpu ' + s.cpu_pct + '%', 'ram ' + s.mem_pct + '%',
+                         s.disk_used_tb + '/' + s.disk_total_tb + 'T', s.temp_c + '°']) {
+        box.appendChild(sep());
+        box.appendChild(document.createTextNode(txt));
+      }
     }
     if (h.plex && h.plex.ok) {
       box.appendChild(sep());

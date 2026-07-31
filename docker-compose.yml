@@ -59,9 +59,12 @@ services:
       JETSTREAM_TITLE_URL: ${JETSTREAM_TITLE_URL:-}
       JETSTREAM_SKIP_URL: ${JETSTREAM_SKIP_URL:-}
       JETSTREAM_COOKIE: ${JETSTREAM_COOKIE:-}
+      # Homelab system stats over SSH (/api/homelab); empty disables the probe
+      HOMELAB_SSH: ${HOMELAB_SSH:-alex@192.168.0.176}
     volumes:
       - ./data/hub:/data              # alarms.json + cached aerials live here
       - ./hub/app/static:/app/app/static   # serve dashboard/index edits without a rebuild
+      - /home/alex/.ssh:/ssh:ro       # homelab stats probe key + known_hosts
     depends_on:
       - appletv
       - cec

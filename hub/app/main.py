@@ -29,6 +29,9 @@ from . import scenes as scenesmod
 
 ATV_URL = os.environ.get("ATV_URL", "http://localhost:8010").rstrip("/")
 CEC_URL = os.environ.get("CEC_URL", "http://localhost:8020").rstrip("/")
+# Which TV HDMI port the Apple TV is on (CEC phys addr n.0.0.0) — lets us force
+# the input switch with Set Stream Path instead of waiting for tvOS to assert.
+ATV_HDMI_INPUT = int(os.environ.get("ATV_HDMI_INPUT", "3"))
 # Pi-side mpv screen player (fallback path; plays video on the Pi's HDMI)
 SCREEN_URL = os.environ.get("SCREEN_URL", "http://localhost:9595").rstrip("/")
 # jetstream broadcast (HLS from the homelab jetstream service), AirPlayed to the
@@ -804,6 +807,46 @@ async def health():
 # --- homelab (Plex server box) status + Plex client-control playback ----
 _homelab_cache: dict = {"at": 0.0, "data": None}
 HOMELAB_TTL = 20
+# System stats over SSH (key + known_hosts mounted read-only at /ssh).
+# Unset HOMELAB_SSH to disable the probe entirely.
+HOMELAB_SSH = os.environ.get("HOMELAB_SSH", "")
+HOMELAB_SSH_KEY = os.environ.get("HOMELAB_SSH_KEY", "/ssh/id_ed25519")
+HOMELAB_DISK = os.environ.get("HOMELAB_DISK", "/mnt/storage")  # media pool mount
+_HOMELAB_STATS_CMD = (
+    "cut -d' ' -f1 /proc/loadavg; nproc; "
+    "free -m | awk '/^Mem:/{{print $3, $2}}'; "
+    "(df -m {disk} 2>/dev/null || df -m /) | awk 'NR==2{{print $3, $2}}'; "
+    "sort -nr /sys/class/thermal/thermal_zone*/temp 2>/dev/null | head -1"
+)
+
+
+async def _homelab_stats():
+    """CPU/RAM/disk/temp from the homelab over SSH (one round-trip, ~0.4s,
+    shares the endpoint's 20s cache). None when SSH isn't configured."""
+    if not HOMELAB_SSH:
+        return None
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "ssh", "-i", HOMELAB_SSH_KEY,
+            "-o", "BatchMode=yes", "-o", "ConnectTimeout=3",
+            "-o", f"UserKnownHostsFile={os.path.dirname(HOMELAB_SSH_KEY)}/known_hosts",
+            HOMELAB_SSH, _HOMELAB_STATS_CMD.format(disk=HOMELAB_DISK),
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
+        out, _ = await asyncio.wait_for(proc.communicate(), timeout=6.0)
+        load_s, cores_s, mem_s, disk_s, temp_s = out.decode().splitlines()[:5]
+        load, cores = float(load_s), int(cores_s)
+        mem_used, mem_total = map(int, mem_s.split())
+        disk_used, disk_total = map(int, disk_s.split())
+        return {"ok": True,
+                "load": load, "cores": cores,
+                "cpu_pct": round(100 * load / cores),
+                "mem_pct": round(100 * mem_used / mem_total),
+                "disk_used_tb": round(disk_used / 1024 / 1024, 1),
+                "disk_total_tb": round(disk_total / 1024 / 1024, 1),
+                "disk_pct": round(100 * disk_used / disk_total),
+                "temp_c": round(int(temp_s) / 1000)}
+    except Exception:  # noqa: BLE001 - status must never throw
+        return {"ok": False}
 # share-relative library prefix -> (Plex section, item type) as mounted on the
 # server (/data/movies, /data/tv). type 1 = movie, 4 = episode.
 _PLEX_VIDEO_SECTIONS = {"movies": ("1", 1), "tv": ("2", 4)}
@@ -869,9 +912,10 @@ async def homelab():
         except (httpx.RequestError, ValueError):
             return {"ok": False}
 
-    latency, plex, live = await asyncio.gather(tcp_latency(), plex_info(), live_info())
+    latency, plex, live, stats = await asyncio.gather(
+        tcp_latency(), plex_info(), live_info(), _homelab_stats())
     data = {"host": host, "up": latency is not None, "latency_ms": latency,
-            "plex": plex, "live": live}
+            "plex": plex, "live": live, "stats": stats}
     _homelab_cache.update(at=time.time(), data=data)
     return data
 
@@ -930,11 +974,17 @@ async def plex_play_on_atv(body: dict):
     if not item:
         raise HTTPException(status_code=404, detail="file not in the Plex library")
 
-    # TV over to the Apple TV while Plex spins up (all tolerant of CEC hiccups)
-    await client.post(f"{CEC_URL}/api/tv/on")
-    await client.post(f"{CEC_URL}/api/source/release")
-    await client.post(f"{ATV_URL}/api/power/on")
-    await client.post(f"{ATV_URL}/api/launch/{PLEX_ATV_BUNDLE}")
+    # TV over to the Apple TV while Plex spins up (all tolerant of CEC hiccups):
+    # force the input with Set Stream Path and wake the ATV concurrently.
+    await asyncio.gather(
+        client.post(f"{SCREEN_URL}/tv/input", json={"n": ATV_HDMI_INPUT}),
+        client.post(f"{ATV_URL}/api/power/on"),
+        return_exceptions=True,
+    )
+    try:
+        await client.post(f"{ATV_URL}/api/launch/{PLEX_ATV_BUNDLE}")
+    except httpx.RequestError as exc:
+        raise HTTPException(status_code=502, detail=f"Plex launch failed: {exc}") from exc
     _active_input = "appletv"
 
     target = None
@@ -992,16 +1042,17 @@ async def input_status():
 async def input_appletv():
     """Switch the TV to the Apple TV.
 
-    The Pi can explicitly make itself active over CEC, but cannot directly make
-    the Apple TV active. Release the Pi's active-source claim first, then wake
-    the Apple TV so its HDMI-CEC handoff has a clear path to take over.
+    Force the TV straight to the Apple TV's HDMI port with Set Stream Path
+    (via the screen player's /tv/input, which also wakes the TV) while waking
+    the Apple TV in parallel. The old release-and-wait-for-tvOS handoff took
+    5-10s and stalled entirely if the Apple TV was already awake.
     """
     global _active_input
     errors = [
-        err for err in (
-            await _post_required(f"{CEC_URL}/api/tv/on", "TV power"),
-            await _post_required(f"{CEC_URL}/api/source/release", "Pi input release"),
-            await _post_required(f"{ATV_URL}/api/power/on", "Apple TV wake"),
+        err for err in await asyncio.gather(
+            _post_required(f"{SCREEN_URL}/tv/input", "TV input switch",
+                           json={"n": ATV_HDMI_INPUT}),
+            _post_required(f"{ATV_URL}/api/power/on", "Apple TV wake"),
         )
         if err
     ]
@@ -1034,8 +1085,11 @@ async def apple_music():
     appletv_music alarm). CEC turns the TV on → power_on resumes the last session
     → launch Music → play (idempotent, always ends Playing)."""
     global _active_input
-    await client.post(f"{CEC_URL}/api/tv/on")
-    await client.post(f"{ATV_URL}/api/power/on")   # wake + resume last playback
+    await asyncio.gather(                           # TV to the ATV input + wake, together
+        client.post(f"{SCREEN_URL}/tv/input", json={"n": ATV_HDMI_INPUT}),
+        client.post(f"{ATV_URL}/api/power/on"),     # wake + resume last playback
+        return_exceptions=True,
+    )
     await asyncio.sleep(4)                          # let the TV + ATV wake
     await client.post(f"{ATV_URL}/api/launch/com.apple.TVMusic")
     await asyncio.sleep(2)
