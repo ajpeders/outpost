@@ -34,6 +34,14 @@ async def status():
     return await cec.status()
 
 
+@app.post("/api/status/invalidate")
+async def status_invalidate():
+    """Force the next /api/status to re-probe (the caller drove the TV by
+    some other route, e.g. the screen player's host-side cec-ctl)."""
+    cec.invalidate_status()
+    return {"ok": True}
+
+
 @app.get("/api/tv/power")
 async def tv_power():
     return {"power": await cec.tv_power()}

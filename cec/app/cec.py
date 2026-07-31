@@ -26,8 +26,20 @@ TV = "0"  # CEC logical address of the TV
 DEV = os.environ.get("CEC_ADAPTER", "/dev/cec0")
 VOLUME_TARGET = os.environ.get("CEC_VOLUME_TARGET", TV)
 
-_STATUS_TTL = 5.0
+# TV power changes only when something on this Pi drives it (or the user picks
+# up the TV remote), and every miss costs ~0.8s *and* re-registers the shared
+# /dev/cec0 — which is what used to knock input switching out. The UI polls
+# status every 10s, so a short TTL meant every poll hit the bus. Our own power
+# commands publish the new state into the cache, so the UI still updates
+# instantly; only a change made on the TV itself waits out the TTL.
+_STATUS_TTL = float(os.environ.get("CEC_STATUS_TTL", "45"))
 _status_cache: dict = {"at": 0.0, "data": None}
+
+
+def _publish_power(state: str) -> None:
+    """Record a power state we just caused, so the next status is free."""
+    _status_cache["at"] = time.monotonic()
+    _status_cache["data"] = {"adapter": True, "tv_power": state}
 _phys_addr: str | None = None   # cached "x.y.z.w" (changes only on replug)
 
 
@@ -86,10 +98,12 @@ async def _physical_address() -> str:
 # --- actions -----------------------------------------------------------
 async def tv_on() -> None:
     await _cec_ctl("--playback", "--to", TV, "--image-view-on")
+    _publish_power("on")
 
 
 async def tv_off() -> None:
     await _cec_ctl("--playback", "--to", TV, "--standby")
+    _publish_power("standby")
 
 
 async def volume(direction: str) -> None:
@@ -108,6 +122,14 @@ async def make_active_source() -> None:
     await _register()
     await _cec_ctl("--to", TV, "--image-view-on")
     await _cec_ctl("--active-source", f"phys-addr={pa}")
+    _publish_power("on")
+
+
+def invalidate_status() -> None:
+    """Drop the cached power state — for when something outside this service
+    drove the TV (the screen player's input switch runs cec-ctl on the host)."""
+    _status_cache["at"] = 0.0
+    _status_cache["data"] = None
 
 
 async def release_source() -> None:

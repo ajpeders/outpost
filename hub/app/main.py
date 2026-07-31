@@ -1031,6 +1031,15 @@ async def plex_play_on_atv(body: dict):
             "client": target.get("name")}
 
 
+async def _cec_status_stale() -> None:
+    """The screen player drives the TV with host-side cec-ctl, so the cec
+    service's cached power state can't know about it. Never fatal."""
+    try:
+        await client.post(f"{CEC_URL}/api/status/invalidate", timeout=3.0)
+    except httpx.RequestError:
+        pass
+
+
 # --- TV input switcher (CEC) ---
 @app.get("/api/input/status")
 async def input_status():
@@ -1059,6 +1068,7 @@ async def input_appletv():
     if errors:
         return JSONResponse(status_code=502, content={"ok": False, "error": "; ".join(errors)})
     _active_input = "appletv"
+    await _cec_status_stale()
     return {"ok": True, "input": "appletv"}
 
 
@@ -1076,6 +1086,7 @@ async def input_pi():
     if err:
         return JSONResponse(status_code=502, content={"ok": False, "error": err})
     _active_input = "pi"
+    await _cec_status_stale()
     return {"ok": True, "input": "pi"}
 
 

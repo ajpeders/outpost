@@ -138,6 +138,13 @@ the TV set (CEC), hosts the hub app, and runs scheduled automations.
   the screen player's `/tv/input`) and wakes the ATV in parallel. Measured
   **~0.8 s** both directions; `play_on_atv` and the Apple Music one-tap use the
   same path.
+- **CEC status polling no longer hammers the bus** — the UI polls TV state every
+  10 s but the cec cache expired after 5 s, so *every* poll ran a real bus query:
+  0.8 s per call, and each one re-registers the shared `/dev/cec0` (the known
+  cause of input-switch flakiness). TTL is now 45 s (`CEC_STATUS_TTL`), power
+  commands publish the state they just caused, and the hub invalidates the cache
+  after a host-side switch so nothing goes stale. `/api/health` went from
+  **0.85 s → 0.03 s**.
 - **Homelab stats on the TV dashboard** — `/api/homelab` gained an SSH probe
   (load→CPU%, RAM%, media-pool disk, hottest sensor) alongside the existing
   latency / Plex-sessions / jetstream-live info. `openssh-client` in the hub
