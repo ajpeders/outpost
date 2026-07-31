@@ -122,6 +122,18 @@ async def launch(bundle: str, select: bool = True):
     return {"ok": True, "launched": bundle}
 
 
+@app.post("/api/open_url")
+async def open_url(body: dict):
+    """Hand a URL to tvOS (Companion open-URL). Deep links like
+    plex://… let an app jump straight to content without any
+    remote-control or client-advertisement plumbing."""
+    url = (body.get("url") or "").strip()
+    if not url:
+        raise HTTPException(status_code=400, detail="url required")
+    await manager.launch_app(url)
+    return {"ok": True, "opened": url}
+
+
 @app.post("/api/power/{action}")
 async def power(action: str):
     if action == "on":
