@@ -138,6 +138,14 @@ the TV set (CEC), hosts the hub app, and runs scheduled automations.
   the screen player's `/tv/input`) and wakes the ATV in parallel. Measured
   **~0.8 s** both directions; `play_on_atv` and the Apple Music one-tap use the
   same path.
+- **Livestream starts in ~1 s instead of ~57 s** (2026-08-01) — the hub handed
+  mpv jetstream's *master* playlist, so ffmpeg probed all three renditions before
+  playing (6.71 s to open vs 0.68 s for a single variant) and that negotiation
+  could outlast the 24 s segment window: the first segment it asked for was
+  already deleted, `avformat_open_input` failed, and mpv only recovered by
+  re-parsing the master as a plain m3u. The hub now resolves the
+  highest-bandwidth rendition itself (cached 5 min, falls back to the configured
+  URL) for both the Pi screen player and the Apple TV AirPlay path.
 - **CEC status polling no longer hammers the bus** — the UI polls TV state every
   10 s but the cec cache expired after 5 s, so *every* poll ran a real bus query:
   0.8 s per call, and each one re-registers the shared `/dev/cec0` (the known
