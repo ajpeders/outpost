@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import datetime
 import os
+import re
 import shutil
 import time
 from contextlib import asynccontextmanager
@@ -497,6 +498,46 @@ def _wake_tv_to_pi() -> asyncio.Task:
     return asyncio.create_task(run())
 
 
+_jetstream_variant: dict = {"at": 0.0, "url": None}
+JETSTREAM_VARIANT_TTL = 300
+
+
+async def _jetstream_play_url() -> str:
+    """Resolve JETSTREAM_URL to a single rendition playlist.
+
+    Handing a player the master playlist is slow and fragile: ffmpeg probes
+    every rendition before it starts (measured 6.7s vs 0.68s for a direct
+    variant), and that negotiation can outlast jetstream's 24-second segment
+    window — the first segment it asks for is already deleted, mpv fails to
+    open the stream, and the retry costs the better part of a minute before
+    a picture appears. Picking the highest-bandwidth rendition ourselves is
+    one cheap request. Falls back to the configured URL on any problem, so a
+    jetstream change can never leave us with nothing to play."""
+    base = JETSTREAM_URL.split("?", 1)[0]
+    if time.time() - _jetstream_variant["at"] < JETSTREAM_VARIANT_TTL and _jetstream_variant["url"]:
+        return _jetstream_variant["url"]
+    try:
+        r = await client.get(base, headers=_jetstream_headers(), timeout=5.0)
+        r.raise_for_status()
+        best, best_bw = None, -1
+        lines = r.text.splitlines()
+        for i, line in enumerate(lines):
+            if not line.startswith("#EXT-X-STREAM-INF"):
+                continue
+            m = re.search(r"BANDWIDTH=(\d+)", line)
+            nxt = next((v.strip() for v in lines[i + 1:] if v.strip()
+                        and not v.startswith("#")), None)
+            if m and nxt and int(m.group(1)) > best_bw:
+                best, best_bw = nxt, int(m.group(1))
+        if best:
+            url = str(httpx.URL(base).join(best))
+            _jetstream_variant.update(at=time.time(), url=url)
+            return url
+    except (httpx.HTTPError, ValueError):
+        pass
+    return base                      # not a master playlist, or jetstream is down
+
+
 @app.post("/api/screen/livestream")
 async def screen_livestream():
     """Play the jetstream broadcast on the Pi's HDMI (native HDR10, works today).
@@ -505,7 +546,7 @@ async def screen_livestream():
     global _active_input
     if not JETSTREAM_URL:
         raise HTTPException(status_code=503, detail="JETSTREAM_URL not configured")
-    url = JETSTREAM_URL.split("?", 1)[0]
+    url = await _jetstream_play_url()
     wake = _wake_tv_to_pi()          # TV starts warming up immediately
     _active_input = "pi"
     # Title lookup runs concurrently and gets a short budget — a slow homelab
@@ -537,7 +578,7 @@ async def jetstream_start():
         await client.post(f"{CEC_URL}/api/tv/on")
     except httpx.RequestError:
         pass
-    await client.post(f"{ATV_URL}/api/play_url", json={"url": JETSTREAM_URL})
+    await client.post(f"{ATV_URL}/api/play_url", json={"url": await _jetstream_play_url()})
     _active_input = "appletv"
     return {"ok": True, "playing": "jetstream", "target": "appletv"}
 
