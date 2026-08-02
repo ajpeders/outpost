@@ -446,9 +446,9 @@ async def screen_play(body: dict):
 
 @app.post("/api/screen/control")
 async def screen_control(body: dict):
-    """Transport control for the Pi's mpv playback. body: {action, secs?}.
-    action = pause (toggle) | seek (relative, secs). Only works for on-demand
-    media (live HLS has no IPC socket)."""
+    """Transport control for the Pi's mpv playback. body: {action, ...}.
+    action = pause (toggle) | seek (relative, secs) | chapter (n) | audio |
+    volume ({level} absolute 0-130, or {step} relative) | mute (toggle)."""
     try:
         r = await client.post(f"{SCREEN_URL}/control", json=body)
     except httpx.RequestError as exc:

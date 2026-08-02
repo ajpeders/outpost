@@ -559,6 +559,11 @@ def _status() -> dict:
         "title": _title if playing else None,
         "subtitle": _subtitle if playing else None,
     }
+    if playing:
+        vol = _ipc_prop("volume")       # live streams have a socket too
+        if vol is not None:
+            st["volume"] = round(float(vol))
+            st["muted"] = bool(_ipc_prop("mute"))
     if playing and _profile == "media":
         st["paused"] = bool(_ipc_prop("pause"))
         pos, dur = _ipc_prop("time-pos"), _ipc_prop("duration")
@@ -770,6 +775,28 @@ class Handler(BaseHTTPRequestHandler):
                 ok = _ipc(["add", "chapter", n]) is not None
             elif action == "audio":         # cycle audio track (multi-audio files)
                 ok = _ipc(["cycle", "audio"]) is not None
+            elif action == "volume":
+                # mpv's own (software) volume — instant and absolute, unlike
+                # CEC stepping against the TV. Absolute with {"level": 0-130},
+                # relative with {"step": ±n}.
+                if body.get("level") is not None:
+                    try:
+                        level = max(0.0, min(130.0, float(body["level"])))
+                    except (TypeError, ValueError):
+                        return self._send(400, {"error": "level must be a number"})
+                    ok = _ipc(["set_property", "volume", level]) is not None
+                else:
+                    try:
+                        step = float(body.get("step", 5) or 5)
+                    except (TypeError, ValueError):
+                        step = 5.0
+                    ok = _ipc(["add", "volume", step]) is not None
+                return self._send(200, {"ok": ok, "volume": _ipc_prop("volume"),
+                                        "muted": bool(_ipc_prop("mute"))})
+            elif action == "mute":
+                ok = _ipc(["cycle", "mute"]) is not None
+                return self._send(200, {"ok": ok, "volume": _ipc_prop("volume"),
+                                        "muted": bool(_ipc_prop("mute"))})
             else:
                 return self._send(400, {"error": "unknown action"})
             self._send(200, {"ok": ok})

@@ -116,6 +116,15 @@
   .transport2 button { min-height: 46px; border-radius: 8px; background: var(--surface-2); font-size: 14px; font-weight: 800; }
   .transport2 .stop { background: rgba(102, 33, 34, .78); color: #ffe2df; }
 
+  /* mpv's own volume — the TV's CEC volume is a separate, coarser control */
+  .np-volume { display: grid; grid-template-columns: 46px minmax(0, 1fr) 44px;
+               gap: 10px; align-items: center; margin-top: 8px; }
+  .np-volume button { min-height: 46px; border-radius: 8px; background: var(--surface-2);
+                      font-size: 17px; }
+  .np-volume input[type=range] { width: 100%; accent-color: var(--accent); height: 30px; }
+  .np-volume .vol-val { font-size: 13px; font-weight: 800; opacity: .75; text-align: right;
+                        font-variant-numeric: tabular-nums; }
+
   .layout { display: grid; grid-template-columns: minmax(330px, 420px) minmax(0, 1fr); gap: 14px; align-items: start; margin-top: 14px; }
   .stack { display: grid; gap: 14px; min-width: 0; }
 
@@ -283,6 +292,11 @@
       <button id="np-cc" class="secondary">CC · Subtitles</button>
       <button id="np-audio" class="secondary hidden">🔉 Audio</button>
       <button id="np-stop" class="stop">■ Stop</button>
+    </div>
+    <div class="np-volume hidden" id="np-volume">
+      <button id="vol-mute" class="secondary" aria-label="Mute">🔊</button>
+      <input type="range" id="vol-slider" min="0" max="100" step="2" aria-label="Volume">
+      <span class="vol-val" id="vol-val">–</span>
     </div>
     <div class="transport2 hidden" id="media-nav">
       <button id="ch-prev" class="secondary">« Chapter</button>
@@ -827,6 +841,7 @@ function showTransport(kind) {  // '', 'media', 'live', 'queue'
   $('#transport2').classList.toggle('hidden', !(media || live)); // stop row: any playback
   $('#queue-row').classList.toggle('hidden', !queue);          // plex queue controls
   $('#media-nav').classList.toggle('hidden', !media);          // chapters + next episode
+  $('#np-volume').classList.toggle('hidden', !(media || live)); // mpv volume: any Pi playback
   $('#np-cc').classList.toggle('hidden', !media);              // subtitles: media only
   $('#np-audio').classList.toggle('hidden', !media);           // audio track: media only
   // Skip only renders while live AND the hub is wired for it. showTransport runs
@@ -945,6 +960,30 @@ $('#pp').addEventListener('click', async () => { await screenControl('pause'); s
 $('#np-stop').addEventListener('click', async () => { toast('Stopping'); await api('POST', '/api/screen/stop'); await api('POST', '/api/jetstream/stop'); });
 $('#np-cc').addEventListener('click', async () => { toast('Subtitles: cycling'); await api('POST', '/api/media/subtitles'); });
 $('#np-audio').addEventListener('click', async () => { toast('Audio: next track'); await api('POST', '/api/screen/control', { action: 'audio' }); });
+/* mpv volume. The slider is the source of truth while you're dragging it —
+   status polls every 4s and would otherwise yank the knob back mid-drag. */
+let volTouched = 0, volMuted = false;
+function paintVolume(level, muted) {
+  if (level == null || Date.now() - volTouched < 3000) return;
+  volMuted = !!muted;
+  $('#vol-slider').value = Math.min(100, Math.round(level));
+  $('#vol-val').textContent = muted ? 'muted' : Math.round(level) + '%';
+  $('#vol-mute').textContent = muted ? '🔇' : '🔊';
+}
+$('#vol-slider').addEventListener('input', () => {
+  volTouched = Date.now();
+  $('#vol-val').textContent = $('#vol-slider').value + '%';
+});
+$('#vol-slider').addEventListener('change', async () => {
+  volTouched = Date.now();
+  const r = await api('POST', '/api/screen/control',
+                      { action: 'volume', level: Number($('#vol-slider').value) });
+  if (!r.ok) toast('Volume failed');
+});
+$('#vol-mute').addEventListener('click', async () => {
+  const r = await api('POST', '/api/screen/control', { action: 'mute' });
+  if (r.ok && r.data) { volTouched = 0; paintVolume(r.data.volume, r.data.muted); }
+});
 $('#ch-prev').addEventListener('click', () => api('POST', '/api/screen/control', { action: 'chapter', n: -1 }));
 $('#ch-next').addEventListener('click', () => api('POST', '/api/screen/control', { action: 'chapter', n: 1 }));
 $('#file-next').addEventListener('click', async () => {
@@ -1135,6 +1174,7 @@ async function refresh() {
 
   if (screenPlaying) {
     setArtwork('');
+    paintVolume(sd.volume, sd.muted);
     const u = decodeURIComponent(sd.url);
     const isLive = sd.profile === 'live' || /\.m3u8|live\.thelunadog/i.test(u);
     if (isLive) {
