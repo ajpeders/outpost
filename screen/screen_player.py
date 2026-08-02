@@ -575,7 +575,17 @@ def _status() -> dict:
 # so the supervisor watches mpv's log and rejoins once when it sees this.
 _CORRUPT_MARKERS = (b"error while decoding", b"Reference", b"unavailable for requested intra")
 CORRUPT_ERR_THRESHOLD = int(os.environ.get("SCREEN_CORRUPT_ERRS", "25"))
+# The rejoin budget is *rolling*, not per-playback. jetstream starts a new
+# ffmpeg run (new fMP4 init segment) at every title change — roughly every
+# 20-30 min — and mpv carries the stale init across the discontinuity, so the
+# picture corrupts at each boundary and only a rejoin clears it. With a
+# lifetime budget, the third title change of the evening exhausted it and left
+# a permanently smeared picture on the TV. Allow 3 rejoins per window and let
+# the window lapse after a stretch of healthy playback; a genuinely broken
+# stream still can't spin forever.
+CORRUPT_BUDGET_WINDOW = float(os.environ.get("SCREEN_CORRUPT_WINDOW", "300"))
 _corrupt_restarts = 0     # per user-initiated playback; reset in _play()
+_corrupt_window_at = 0.0  # when the current budget window started
 
 
 def _new_log_errors(pos: int) -> tuple[int, int]:
@@ -591,13 +601,21 @@ def _new_log_errors(pos: int) -> tuple[int, int]:
     return n, pos + len(data)
 
 
+def _rejoin_budget() -> None:
+    """Spend one rejoin; the first spend of a window starts its clock."""
+    global _corrupt_restarts, _corrupt_window_at
+    if _corrupt_restarts == 0:
+        _corrupt_window_at = time.time()
+    _corrupt_restarts += 1
+
+
 def _supervisor() -> None:
     """Keep the current playback healthy. For live streams: relaunch mpv if it
     dies (self-heal a skip / transcode restart) — after a settle delay, so we
     don't rejoin mid-churn — and rejoin once if the picture is decode-corrupted.
     For media files, when mpv exits (movie ended) mark idle so callers can hand
     the TV back to the Apple TV."""
-    global _stopped, _url, _title, _subtitle, _source, _corrupt_restarts
+    global _stopped, _url, _title, _subtitle, _source, _corrupt_restarts, _corrupt_window_at
     dead_since = 0.0
     last_proc = None
     log_pos = 0
@@ -619,10 +637,13 @@ def _supervisor() -> None:
             if _alive():
                 dead_since = 0.0
                 if _profile == "live":
+                    if (_corrupt_restarts
+                            and time.time() - _corrupt_window_at >= CORRUPT_BUDGET_WINDOW):
+                        _corrupt_restarts = 0   # healthy for a while -> budget refills
                     n, log_pos = _new_log_errors(log_pos)
                     spawn_errors += n
                     if spawn_errors >= CORRUPT_ERR_THRESHOLD and _corrupt_restarts < 3:
-                        _corrupt_restarts += 1
+                        _rejoin_budget()
                         _spawn()                # clean rejoin fixes the smear
                         continue
                     # video-freeze watchdog: audio keeps playing but the video
@@ -633,7 +654,7 @@ def _supervisor() -> None:
                     if pts is not None and pts == last_video_pts and not _ipc_prop("pause"):
                         video_stalls += 1
                         if video_stalls >= 3 and _corrupt_restarts < 3:
-                            _corrupt_restarts += 1
+                            _rejoin_budget()
                             video_stalls = 0
                             _spawn()            # video wedged: clean rejoin
                     else:
