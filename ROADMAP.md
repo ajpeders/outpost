@@ -138,6 +138,14 @@ the TV set (CEC), hosts the hub app, and runs scheduled automations.
   the screen player's `/tv/input`) and wakes the ATV in parallel. Measured
   **~0.8 s** both directions; `play_on_atv` and the Apple Music one-tap use the
   same path.
+- **Dashboard comes up in 2.7 s instead of 4.9 s** (2026-08-01) — the aerial video
+  is on screen in 0.2 s, but the overlay (clock/weather/homelab) lagged ~5 s
+  behind it, and that render was mostly *sleeping*: a flat `sleep(SETTLE)`=2 s
+  plus a 0.5 s post-reload sleep were 2.5 s of a 3.0 s warm render. Both are now
+  a readiness poll — capture as soon as the clock has text and the weather temp
+  has arrived (100 ms poll, 3 s cap, old fixed wait as fallback). Cold render
+  3.7 s → 1.8 s, warm 3.0 s → 0.8 s. Each render now logs its duration and
+  whether the renderer was warm.
 - **Livestream no longer corrupts permanently** (2026-08-01) — jetstream starts a
   new ffmpeg run (new fMP4 init segment) at every title change, ~every 20-30 min;
   mpv carries the stale init across the discontinuity, so the picture smears and
