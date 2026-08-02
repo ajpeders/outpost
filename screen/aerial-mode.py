@@ -232,12 +232,32 @@ class OverlayRenderer:
             time.sleep(0.25)
         return False
 
+    def _painted(self, timeout: float = 3.0) -> bool:
+        """Wait until the dashboard has actually drawn its content.
+
+        This replaced a flat `sleep(SETTLE)`: the fixed 2s wait was most of a
+        3s render, and it was both too long on a warm renderer and a guess on
+        a cold one. Poll the two fields that arrive last — the clock (local,
+        instant) and the weather temperature (a hub fetch) — so we capture as
+        soon as there is something worth capturing."""
+        end = time.time() + timeout
+        expr = ("(((document.getElementById('time')||{}).textContent||'').length > 3) && "
+                "(['','–','-'].indexOf((((document.getElementById('wx-temp')||{})"
+                ".textContent)||'').trim()) === -1)")
+        while time.time() < end:
+            r = self._session_send("Runtime.evaluate",
+                                   {"expression": expr, "returnByValue": True})
+            if r.get("result", {}).get("value") is True:
+                return True
+            time.sleep(0.1)
+        return False
+
     def render(self, reload: bool = True) -> bytes | None:
         if reload:
             self._session_send("Page.reload")
-            time.sleep(0.5)
         self._ready()
-        time.sleep(SETTLE)   # let JS paint (weather/alarm fetches are local)
+        if not self._painted():
+            time.sleep(SETTLE)   # content never showed up: fall back to the old wait
         data = self._session_send("Page.captureScreenshot", {"format": "png"},
                                   timeout=30)["data"]
         return base64.b64decode(data)
@@ -266,6 +286,8 @@ def _render_overlay() -> bool:
     falling back to a cold one-shot render so the clock never sticks."""
     global _renderer
     png = None
+    t0 = time.time()
+    cold = _renderer is None or _renderer.proc is None or _renderer.proc.poll() is not None
     for attempt in (1, 2):
         try:
             if _renderer is None or _renderer.proc is None or _renderer.proc.poll() is not None:
@@ -288,12 +310,15 @@ def _render_overlay() -> bool:
             fh.write(png)
     elif not _render_cold():
         return False
+    t_png = time.time()
     r = subprocess.run(
         ["ffmpeg", "-y", "-loglevel", "error", "-i", PNG,
          # belt-and-braces exact size: overlay-add needs exactly WxH (stride W*4)
          "-vf", f"crop='min(iw,{W})':'min(ih,{H})':0:0,pad={W}:{H}:0:0:black@0",
          "-f", "rawvideo", "-pix_fmt", "bgra", RAW],
         capture_output=True)
+    print(f"aerial: overlay render {'cold' if cold else 'warm'} "
+          f"{t_png - t0:.1f}s + bgra {time.time() - t_png:.1f}s", flush=True)
     return r.returncode == 0
 
 
