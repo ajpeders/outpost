@@ -138,6 +138,20 @@ the TV set (CEC), hosts the hub app, and runs scheduled automations.
   the screen player's `/tv/input`) and wakes the ATV in parallel. Measured
   **~0.8 s** both directions; `play_on_atv` and the Apple Music one-tap use the
   same path.
+- **Livestream no longer corrupts permanently** (2026-08-01) — jetstream starts a
+  new ffmpeg run (new fMP4 init segment) at every title change, ~every 20-30 min;
+  mpv carries the stale init across the discontinuity, so the picture smears and
+  only a rejoin clears it. The rejoin budget was 3 per playback and never
+  refilled, so the third episode boundary of the evening left a permanently
+  corrupted picture (8574 decode errors in one session; the source segments were
+  verified decoding clean). Budget now refills after 300 s of healthy playback
+  (`SCREEN_CORRUPT_WINDOW`).
+- **Volume from the phone for Pi playback** (2026-08-01) — screen player
+  `/control` gained `volume` ({level} absolute 0-130 / {step} relative) and
+  `mute`, and reports `volume`/`muted` in `/status` for live as well as media.
+  The now-playing hero gets a slider + mute button — absolute and instant, where
+  the TV's CEC volume is coarse relative stepping with a ~0.5 s round trip and no
+  readout.
 - **Livestream starts in ~1 s instead of ~57 s** (2026-08-01) — the hub handed
   mpv jetstream's *master* playlist, so ffmpeg probed all three renditions before
   playing (6.71 s to open vs 0.68 s for a single variant) and that negotiation
