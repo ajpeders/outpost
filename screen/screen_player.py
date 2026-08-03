@@ -606,12 +606,23 @@ def _new_log_errors(pos: int) -> tuple[int, int]:
     return n, pos + len(data)
 
 
-def _rejoin_budget() -> None:
+def _rejoin_budget(reason: str) -> None:
     """Spend one rejoin; the first spend of a window starts its clock."""
     global _corrupt_restarts, _corrupt_window_at
     if _corrupt_restarts == 0:
         _corrupt_window_at = time.time()
     _corrupt_restarts += 1
+    _log_event(f"rejoin ({reason}) — budget {_corrupt_restarts}/3 this window")
+
+
+def _log_event(msg: str) -> None:
+    """Say what the supervisor did, and why, in the journal.
+
+    Self-healing used to be invisible: the only evidence a rejoin had happened
+    was a new mpv PID in the journal, so working out what a stream did overnight
+    meant diffing process ids against timestamps. These lines make it greppable
+    (`journalctl -u screen-player | grep 'screen:'`)."""
+    print(f"screen: {msg} [{_source or 'idle'}: {_title or _url or '-'}]", flush=True)
 
 
 def _supervisor() -> None:
@@ -627,6 +638,7 @@ def _supervisor() -> None:
     spawn_errors = 0
     last_video_pts = None
     video_stalls = 0
+    budget_warned = False    # so an exhausted budget logs once, not every 3s
     while True:
         time.sleep(3)
         with _lock:
@@ -645,12 +657,20 @@ def _supervisor() -> None:
                     if (_corrupt_restarts
                             and time.time() - _corrupt_window_at >= CORRUPT_BUDGET_WINDOW):
                         _corrupt_restarts = 0   # healthy for a while -> budget refills
+                        budget_warned = False
+                        _log_event("healthy — rejoin budget refilled")
                     n, log_pos = _new_log_errors(log_pos)
                     spawn_errors += n
-                    if spawn_errors >= CORRUPT_ERR_THRESHOLD and _corrupt_restarts < 3:
-                        _rejoin_budget()
-                        _spawn()                # clean rejoin fixes the smear
-                        continue
+                    if spawn_errors >= CORRUPT_ERR_THRESHOLD:
+                        if _corrupt_restarts < 3:
+                            _rejoin_budget(f"{spawn_errors} decode errors")
+                            _spawn()            # clean rejoin fixes the smear
+                            continue
+                        if not budget_warned:   # once per exhausted window
+                            budget_warned = True
+                            _log_event("rejoin budget spent — leaving a corrupt "
+                                       "picture up; refills after "
+                                       f"{CORRUPT_BUDGET_WINDOW:.0f}s healthy")
                     # video-freeze watchdog: audio keeps playing but the video
                     # frame counter stops (post-discontinuity wedge; video-pts
                     # is unavailable on this profile). 3 consecutive stalled
@@ -659,7 +679,7 @@ def _supervisor() -> None:
                     if pts is not None and pts == last_video_pts and not _ipc_prop("pause"):
                         video_stalls += 1
                         if video_stalls >= 3 and _corrupt_restarts < 3:
-                            _rejoin_budget()
+                            _rejoin_budget("video frozen ~9s, audio still running")
                             video_stalls = 0
                             _spawn()            # video wedged: clean rejoin
                     else:
@@ -673,8 +693,10 @@ def _supervisor() -> None:
                     dead_since = time.time()
                 elif time.time() - dead_since >= 4:
                     dead_since = 0.0
+                    _log_event("mpv exited — relaunching (jetstream run change?)")
                     _spawn()                    # live: relaunch
             else:
+                _log_event("playback finished — back to the dashboard")
                 _stopped, _url, _title, _subtitle, _source = True, None, None, None, None
                 _kiosk("start")               # -> back to the idle dashboard
 
