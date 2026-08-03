@@ -589,6 +589,10 @@ CORRUPT_ERR_THRESHOLD = int(os.environ.get("SCREEN_CORRUPT_ERRS", "25"))
 # the window lapse after a stretch of healthy playback; a genuinely broken
 # stream still can't spin forever.
 CORRUPT_BUDGET_WINDOW = float(os.environ.get("SCREEN_CORRUPT_WINDOW", "300"))
+# Supervisor polls every 3s, so this is how long a wedged picture stays up
+# before the rejoin starts. Was 3 (~9s); the buffering guard in the watchdog
+# makes 2 (~6s) safe, since a cache stall no longer looks like a freeze.
+VIDEO_STALL_READS = int(os.environ.get("SCREEN_VIDEO_STALL_READS", "2"))
 _corrupt_restarts = 0     # per user-initiated playback; reset in _play()
 _corrupt_window_at = 0.0  # when the current budget window started
 
@@ -673,13 +677,20 @@ def _supervisor() -> None:
                                        f"{CORRUPT_BUDGET_WINDOW:.0f}s healthy")
                     # video-freeze watchdog: audio keeps playing but the video
                     # frame counter stops (post-discontinuity wedge; video-pts
-                    # is unavailable on this profile). 3 consecutive stalled
-                    # reads (~9s) -> clean rejoin.
+                    # is unavailable on this profile). This is the failure mode
+                    # that actually fires in practice, so detect it fast: a
+                    # frozen picture lasts stalls x 3s plus the rejoin.
+                    # Buffering stalls the counter too and resolves on its own —
+                    # rejoining through one would turn a hiccup into a restart —
+                    # so paused-for-cache doesn't count and clears the tally.
                     pts = _ipc_prop("estimated-frame-number")
-                    if pts is not None and pts == last_video_pts and not _ipc_prop("pause"):
+                    buffering = bool(_ipc_prop("paused-for-cache"))
+                    if (pts is not None and pts == last_video_pts
+                            and not buffering and not _ipc_prop("pause")):
                         video_stalls += 1
-                        if video_stalls >= 3 and _corrupt_restarts < 3:
-                            _rejoin_budget("video frozen ~9s, audio still running")
+                        if video_stalls >= VIDEO_STALL_READS and _corrupt_restarts < 3:
+                            _rejoin_budget(f"video frozen ~{VIDEO_STALL_READS * 3}s, "
+                                           "audio still running")
                             video_stalls = 0
                             _spawn()            # video wedged: clean rejoin
                     else:
