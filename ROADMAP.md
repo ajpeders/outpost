@@ -146,6 +146,18 @@ the TV set (CEC), hosts the hub app, and runs scheduled automations.
   has arrived (100 ms poll, 3 s cap, old fixed wait as fallback). Cold render
   3.7 s → 1.8 s, warm 3.0 s → 0.8 s. Each render now logs its duration and
   whether the renderer was warm.
+- **Supervisor says what it did** (2026-08-03) — self-healing used to be
+  invisible (only a new mpv PID in the journal), so diagnosing a night of
+  livestream weirdness meant diffing process ids against timestamps. Each rejoin
+  now logs its trigger and budget spend, plus budget-exhausted / refilled / mpv
+  exited / playback finished: `journalctl -u screen-player | grep 'screen:'`.
+  It paid off within a minute: the mode that actually fires is **not** decode
+  corruption but mpv's video wedging while audio keeps running. That path now
+  ignores stalls while `paused-for-cache` (a buffering hiccup stalls the frame
+  counter too, and rejoining through one turns a stutter into a restart), which
+  makes a 2-read (~6 s) trigger safe — frozen picture ~11 s → ~6 s.
+  *(mpv's IPC socket is root-owned: querying properties as a normal user
+  silently returns None for everything.)*
 - **Livestream no longer corrupts permanently** (2026-08-01) — jetstream starts a
   new ffmpeg run (new fMP4 init segment) at every title change, ~every 20-30 min;
   mpv carries the stale init across the discontinuity, so the picture smears and
