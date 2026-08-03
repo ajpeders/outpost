@@ -763,12 +763,22 @@ function autoLibrary(show) {  // poll-driven visibility: respects the pin
   if (!libraryPinned) showLibrary(show);
 }
 $('#w-live').addEventListener('click', async () => {
+  // Hold the button until the stream is actually up. Each POST kills and
+  // respawns mpv, so an impatient second tap restarts a stream that was
+  // already coming — which looks like the first tap failed. (Seen for real:
+  // three taps in three minutes, three restarts.)
+  const b = $('#w-live'), label = b.textContent;
+  if (b.disabled) return;
+  b.disabled = true; b.textContent = 'Starting…';
   setWatchActive('livestream');
   libraryPinned = false;
   showLibrary(false);
   toast('Starting livestream on the TV…');
-  const r = await api('POST', '/api/screen/livestream');
-  if (!r.ok) toast(r.data?.detail || r.data?.error || 'Livestream unavailable');
+  try {
+    const r = await api('POST', '/api/screen/livestream');
+    if (!r.ok) toast(r.data?.detail || r.data?.error || 'Livestream unavailable');
+    else toast('▶ ' + (r.data?.title || 'Livestream') + ' on the TV');
+  } finally { b.disabled = false; b.textContent = label; }
 });
 $('#w-library').addEventListener('click', async () => {
   setWatchActive('library');
