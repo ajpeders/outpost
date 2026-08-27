@@ -6,3 +6,6 @@ __pycache__/
 # runtime artifacts (vision/gstreamer/hailo)
 gstshark_*/
 *.log
+
+# Claude Code local machine settings
+.claude/settings.local.json
