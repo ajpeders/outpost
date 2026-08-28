@@ -111,3 +111,14 @@ If `/api/status` reports no adapter: confirm `/dev/cec0` exists on the Pi
 (`ls /dev/cec*`), that the TV's CEC is enabled (Anynet+/Bravia Sync/SimpLink/…),
 and that the Pi is on an HDMI input the TV can see.
 ```
+
+## Homelab watchdog
+
+`watchdog/watchdog.sh` (cron, every 5 min) is the outside observer for the
+homelab: pings the server + ween-arch and checks two ingress URLs, alerting
+via **ntfy.sh upstream** — not the homelab ntfy, which dies with the server.
+The secret topic name is the credential and lives in `data/watchdog/topic`
+(gitignored). Alerts fire once on down (re-notify daily), one-shot on
+recovery; state + log in `data/watchdog/`. Publish falls back to resolving
+ntfy.sh via Cloudflare DoH at 1.1.1.1, since the Pi's primary DNS is AdGuard
+on the homelab itself.
