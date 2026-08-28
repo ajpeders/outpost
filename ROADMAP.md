@@ -242,13 +242,13 @@ file* to the Apple TV's Plex app instead, which decodes 4K DV natively.
 3. **Real-listening validation** — exercise Plex queue next/prev/stop and Apple
    TV artwork during a real playlist session; ROADMAP still calls these out as
    verify-needed.
-4. **Presence automation spike** — Hailo/person-detection remains the most
-   valuable Pi-native future item once the room-control surface settles.
 
 ## Dropped
 
 - **Pi as media player (Kodi/Jellyfin)** — the Apple TV handles streaming via its
   own apps, so the Pi doesn't need to be a player.
+- **Presence-driven automation (Hailo-8)** — camera + person detection driving
+  auto TV on/off / pause-on-leave. Dropped 2026-08-28; don't re-propose it.
 
 ## Built so far (deployed + running on the Pi, off-homelab)
 
@@ -277,20 +277,16 @@ file* to the Apple TV's Plex app instead, which decodes 4K DV natively.
   playback on the streaming brain. Later. (User: maybe go through the Apple TV app.)
 
 **Pi-native workload ideas** (better on the Pi than the homelab — they need the
-Pi's physical presence at the TV / in the room, the idle Hailo-8, or
-homelab-independence). Homelab keeps: heavy transcoding, storage, services.
-1. **Presence-driven automation (Hailo-8)** — camera + on-device person
-   detection → auto TV on/off (CEC), pause-on-leave / resume-on-return, scenes.
-   The killer app for the currently-idle 26-TOPS accelerator; also fixes the
-   idle black screen.
-2. **On-TV ambient dashboard (light head)** — cage/labwc kiosk showing
+Pi's physical presence at the TV / in the room, or homelab-independence).
+Homelab keeps: heavy transcoding, storage, services.
+1. **On-TV ambient dashboard (light head)** — cage/labwc kiosk showing
    clock/weather/now-playing/home status when idle. The Pi *is* the display.
-3. **Universal AirPlay/Cast receiver** (uxplay/rpiplay) — throw phone/laptop
+2. **Universal AirPlay/Cast receiver** (uxplay/rpiplay) — throw phone/laptop
    content to the TV via the Pi.
-4. **IR blaster** (GPIO) — control soundbar/receiver/older gear CEC can't.
-5. **Local voice / wake-word** control for the room.
-6. **Retro emulation** (RetroPie) at the TV.
-7. **Doorbell/camera feed → TV overlay** (vision + display).
+3. **IR blaster** (GPIO) — control soundbar/receiver/older gear CEC can't.
+4. **Local voice / wake-word** control for the room.
+5. **Retro emulation** (RetroPie) at the TV.
+6. **Doorbell/camera feed → TV overlay** (vision + display).
 ## Make this usable by others (added 2026-08-27)
 
 - [x] Universalize the README / docs / code for outside users (2026-08-27):
