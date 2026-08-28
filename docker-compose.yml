@@ -47,8 +47,8 @@ services:
       PORT: ${HUB_PORT:-8080}
       ATV_URL: http://localhost:${ATV_API_PORT:-8010}
       CEC_URL: http://localhost:${CEC_API_PORT:-8020}
-      TZ: ${TZ:-America/Denver}        # alarm times are wall-clock in this zone
-      PLEX_URL: ${PLEX_URL:-http://192.168.0.176:32400}
+      TZ: ${TZ:-UTC}                   # alarm times are wall-clock in this zone
+      PLEX_URL: ${PLEX_URL:-}
       PLEX_TOKEN: ${PLEX_TOKEN:-}
       # Pi-side mpv screen player (fallback) + the homelab jetstream broadcast.
       # JETSTREAM_URL is the plain HLS manifest — jetstream grants /hls/ to LAN
@@ -60,11 +60,11 @@ services:
       JETSTREAM_SKIP_URL: ${JETSTREAM_SKIP_URL:-}
       JETSTREAM_COOKIE: ${JETSTREAM_COOKIE:-}
       # Homelab system stats over SSH (/api/homelab); empty disables the probe
-      HOMELAB_SSH: ${HOMELAB_SSH:-alex@192.168.0.176}
+      HOMELAB_SSH: ${HOMELAB_SSH:-}
     volumes:
       - ./data/hub:/data              # alarms.json + cached aerials live here
       - ./hub/app/static:/app/app/static   # serve dashboard/index edits without a rebuild
-      - /home/alex/.ssh:/ssh:ro       # homelab stats probe key + known_hosts
+      - ${HUB_SSH_DIR:-./data/ssh}:/ssh:ro   # homelab stats probe key + known_hosts
     depends_on:
       - appletv
       - cec

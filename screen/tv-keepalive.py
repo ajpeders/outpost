@@ -18,14 +18,16 @@ point — keep *the dashboard* on; if it's stopped, leave the TV alone).
 """
 import json
 import os
+import os.path as osp
 import subprocess
 import time
 import urllib.request
 
 ATV_URL = os.environ.get("KEEPALIVE_ATV_URL", "http://localhost:8010")
 CEC_URL = os.environ.get("KEEPALIVE_CEC_URL", "http://localhost:8020")
-RECLAIM = os.environ.get("SCREEN_TV_RECLAIM",
-                         "/home/alex/livingroom-pi/screen/tv-reclaim.sh")
+RECLAIM = os.environ.get(
+    "SCREEN_TV_RECLAIM",
+    osp.join(osp.dirname(osp.abspath(__file__)), "tv-reclaim.sh"))
 POLL = int(os.environ.get("KEEPALIVE_POLL", "6"))            # seconds between polls
 CORRELATE = int(os.environ.get("KEEPALIVE_CORRELATE", "30"))  # ATV-sleep -> TV-off window
 BACKOFF = int(os.environ.get("KEEPALIVE_BACKOFF", "300"))     # stand-down after user override

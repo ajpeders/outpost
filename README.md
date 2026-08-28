@@ -35,14 +35,36 @@ Three services, all host-networked:
 ## Deploy to the Pi
 
 ```sh
-# from this machine, once the Pi is on the LAN:
-rsync -a --exclude .env --exclude data/ ~/livingroom-pi/ livingroom-pi:~/livingroom-pi/
+# from this machine, once the Pi is on the LAN
+# (`pi` here is your own ~/.ssh/config host alias for the Pi):
+rsync -a --exclude .env --exclude data/ ~/livingroom-pi/ pi:~/livingroom-pi/
 
 # on the Pi:
 cd ~/livingroom-pi
-cp .env.example .env && $EDITOR .env      # set ATV_ADDRESS
+cp .env.example .env && $EDITOR .env      # at minimum set ATV_ADDRESS
 docker compose up -d --build
 ```
+
+Everything past `ATV_ADDRESS` is optional and env-driven (see `.env.example`):
+`PLEX_URL`/`PLEX_TOKEN` enable the Plex browser, `JETSTREAM_*` the livestream
+card, `HOMELAB_SSH` the server-stats line on the dashboard. Leave any of them
+blank to turn that feature off. `TZ` sets the wall-clock zone alarms fire in.
+
+## On-TV dashboard (host services, optional)
+
+The ambient dashboard + local mpv player run on the Pi **host** (not Docker) —
+they need to be DRM master on the console. Install the systemd units with the
+helper (it fills the repo path into the units wherever you cloned):
+
+```sh
+sudo screen/install-services.sh
+sudo systemctl enable --now screen-player
+sudo systemctl enable --now aerial-screen   # OR kiosk-screen — pick one
+```
+
+`SCREEN_MEDIA_ROOT` (in the unit's environment or `.env`) points the file/shuffle
+sources at your media; `aerial-screen` needs clips fetched once via
+`screen/fetch-aerials.sh`.
 
 ## Apple TV pairing (one-time)
 

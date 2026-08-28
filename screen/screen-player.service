@@ -8,7 +8,7 @@ Type=simple
 # root so mpv can become DRM master on the console
 User=root
 Environment=SCREEN_PORT=9595
-ExecStart=/usr/bin/python3 /home/alex/livingroom-pi/screen/screen_player.py
+ExecStart=/usr/bin/python3 %%REPO%%/screen/screen_player.py
 Restart=always
 RestartSec=2
 

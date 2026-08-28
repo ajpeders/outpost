@@ -7,7 +7,7 @@ Wants=network-online.target
 Type=simple
 User=root
 # software rendering (v3d can't do the GL a hw compositor needs)
-ExecStart=/home/alex/livingroom-pi/screen/kiosk.sh
+ExecStart=%%REPO%%/screen/kiosk.sh
 # self-heal a crash, but a manual `systemctl stop` (the mpv handoff) stays stopped
 Restart=always
 RestartSec=3

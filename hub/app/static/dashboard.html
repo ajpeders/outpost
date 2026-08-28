@@ -144,7 +144,7 @@
 <script>
 // ---- config (guest-safe: time, weather, now-playing only) ----
 const params = new URLSearchParams(location.search);
-const roomHost = params.get('host') || location.hostname || 'pi5';
+const roomHost = params.get('host') || location.hostname || 'pi';
 let LAT = Number(params.get('lat')) || 39.7392;
 let LON = Number(params.get('lon')) || -104.9903;
 let CITY = params.get('city') || '';   // fallback; auto-detected below

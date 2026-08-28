@@ -5,7 +5,7 @@ Stdlib only — runs on the Pi or any box with python3, no dependencies.
 
 Examples
   ./test-client.py                         # read-only sweep of both services
-  ./test-client.py --atv http://livingroom-pi:8010 status
+  ./test-client.py --atv http://<pi>:8010 status
   ./test-client.py apps                     # list Apple TV apps
   ./test-client.py launch com.plexapp.plex
   ./test-client.py key play_pause           # a remote button

@@ -12,7 +12,7 @@ User=root
 # other. For the screen player's mpv handoff (livestream/alarm) to stop THIS
 # instead of the cage kiosk, set SCREEN_KIOSK_SERVICE=aerial-screen on
 # screen-player.service.
-ExecStart=/usr/bin/python3 /home/alex/livingroom-pi/screen/aerial-mode.py
+ExecStart=/usr/bin/python3 %%REPO%%/screen/aerial-mode.py
 Restart=always
 RestartSec=3
 

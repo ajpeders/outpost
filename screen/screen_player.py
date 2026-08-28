@@ -31,16 +31,17 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
+_HERE = osp.dirname(osp.abspath(__file__))
 IPC_SOCKET = os.environ.get("SCREEN_MPV_IPC", "/tmp/mpv-ipc")  # for sub toggle etc.
 # idle-dashboard kiosk service — stopped while mpv plays (both need DRM master),
 # restarted when playback ends.
 KIOSK_SERVICE = os.environ.get("SCREEN_KIOSK_SERVICE", "kiosk-screen")
 CURSOR_INSTALL = os.environ.get(
-    "SCREEN_CURSOR_INSTALL", "/home/alex/livingroom-pi/screen/install-cursor.sh")
+    "SCREEN_CURSOR_INSTALL", osp.join(_HERE, "install-cursor.sh"))
 # Reclaims the TV's HDMI input for the Pi (CEC active-source) — the Apple TV
 # steals the input when it wakes; this switches the TV back to the dashboard.
 TV_RECLAIM = os.environ.get(
-    "SCREEN_TV_RECLAIM", "/home/alex/livingroom-pi/screen/tv-reclaim.sh")
+    "SCREEN_TV_RECLAIM", osp.join(_HERE, "tv-reclaim.sh"))
 CEC_DEV = os.environ.get("SCREEN_CEC_DEV", "/dev/cec0")
 
 

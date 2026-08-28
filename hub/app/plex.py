@@ -19,7 +19,7 @@ pacing off each track's ``duration``). This module only *resolves*; the
 sequencing lives in the hub (see the queue sketch in PLEX_INTEGRATION.md).
 
 Config (env):
-    PLEX_URL    e.g. http://192.168.0.176:32400   (reachable from the Pi)
+    PLEX_URL    e.g. http://<plex-host>:32400     (reachable from the Pi)
     PLEX_TOKEN  X-Plex-Token for the account
 """
 from __future__ import annotations

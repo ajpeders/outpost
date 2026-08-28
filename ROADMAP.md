@@ -293,8 +293,14 @@ homelab-independence). Homelab keeps: heavy transcoding, storage, services.
 7. **Doorbell/camera feed → TV overlay** (vision + display).
 ## Make this usable by others (added 2026-08-27)
 
-- [ ] Universalize the README / docs / code for outside users: document setup
-  from scratch on generic infrastructure, replace homelab-specific assumptions
-  (private hostnames, LAN addresses, personal paths and defaults) with
-  env-driven configuration plus examples, and keep the public GitHub mirror
-  directly runnable.
+- [x] Universalize the README / docs / code for outside users (2026-08-27):
+  homelab-specific defaults are now env-driven and blank by default — compose
+  `PLEX_URL`/`HOMELAB_SSH` empty (features self-disable), hub `TZ` defaults UTC,
+  the `/ssh` mount is `${HUB_SSH_DIR:-./data/ssh}`. Local deployment keeps its
+  real values in the gitignored `.env`. Personal `/home/alex/...` paths in
+  `screen_player.py` / `tv-keepalive.py` are now script-relative; the systemd
+  units carry a `%%REPO%%` token filled by `screen/install-services.sh` at
+  install time, so the checkout is runnable wherever it's cloned. README gained
+  an env-config rundown + a host-services install section; `.env.example`
+  documents the homelab/ssh/media vars. (`livingroom-pi:` rsync target noted as
+  a user-defined SSH alias.)
