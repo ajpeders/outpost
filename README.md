@@ -12,6 +12,10 @@ Three services, all host-networked:
 | `appletv` | 8010 | Control the Apple TV over pyatv (Companion): remote buttons, now-playing, **list/launch apps**, power, AirPlay stream, volume. Web remote at `/`. |
 | `cec` | 8020 | Control the **TV set** over HDMI-CEC: power, volume, input/source switching. |
 
+Two pieces run on the **host** rather than in Docker, because they need to be DRM
+master on the console or outlive the stack: the mpv screen player + ambient
+dashboard (systemd, see below) and the homelab watchdog (cron).
+
 ## Features
 
 - **Unified remote** — D-pad, buttons, app launcher, now-playing, and TV controls
@@ -29,8 +33,18 @@ Three services, all host-networked:
   UI; persists to `data/hub/alarms.json`.
 - **Plex** — browse libraries, playlists, and search; play tracks/playlists.
 - **Pi-side screen player** — mpv-based local playback (livestream / file / shuffle)
-  with an on-TV cage kiosk dashboard.
-- **Off-homelab** — runs entirely on the Pi; survives homelab reboots.
+  with volume/mute from the phone, resume-where-you-left-off, and a supervisor that
+  self-heals a wedged livestream.
+- **Ambient TV dashboard** — when nothing's playing the TV shows a clock/weather/
+  now-playing/system kiosk over Apple's tvOS aerial clips (`aerial-screen`), or a
+  plain browser kiosk (`kiosk-screen`).
+- **Sleep timer + auto-off** — 30/60/90-min timer, plus a nightly sweep that stands
+  the TV down if it was left on the idle dashboard.
+- **Health panel** — `/api/health` surfaces per-service status, disk, CPU temp,
+  load, and uptime in the UI.
+- **Installable (PWA)** — "Add to Home Screen" gives it an app-like launch.
+- **Off-homelab** — runs entirely on the Pi; survives homelab reboots. A cron
+  watchdog even alerts when the *homelab* goes down (see below).
 
 ## Deploy to the Pi
 
@@ -110,7 +124,6 @@ curl -sX POST http://<pi>:8020/api/tv/volume/up
 If `/api/status` reports no adapter: confirm `/dev/cec0` exists on the Pi
 (`ls /dev/cec*`), that the TV's CEC is enabled (Anynet+/Bravia Sync/SimpLink/…),
 and that the Pi is on an HDMI input the TV can see.
-```
 
 ## Homelab watchdog
 
