@@ -1,11 +1,23 @@
 .env
+.env.*
+!.env.example
 data/
 __pycache__/
 *.pyc
 
-# runtime artifacts (vision/gstreamer/hailo)
+# runtime artifacts (gstreamer/profiling)
 gstshark_*/
 *.log
+
+# credentials that must never be committed
+*.pem
+*.key
+id_ed25519*
+id_rsa*
+pyatv.conf
+
+# personal infrastructure monitor — owner-specific targets, not shippable
+watchdog/
 
 # Claude Code local machine settings
 .claude/settings.local.json

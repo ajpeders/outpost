@@ -30,7 +30,7 @@ from urllib.parse import urlencode
 
 import httpx
 
-PLEX_URL = os.environ.get("PLEX_URL", "http://192.168.0.176:32400").rstrip("/")
+PLEX_URL = os.environ.get("PLEX_URL", "").rstrip("/")
 PLEX_TOKEN = os.environ.get("PLEX_TOKEN", "")
 
 # Plex library `type` codes we care about.

@@ -17,7 +17,10 @@ set -u
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 OUT="${AERIAL_DIR:-$REPO/data/hub/aerials}"
 RES="${RES:-4K}"                       # 4K = url-4K-SDR (HEVC); 1080 = url-1080-H264
-MAX="${AERIAL_MAX:-0}"                  # cap number of clips (0 = whole catalogue)
+# Cap the number of clips. The full catalogue is tens of GB at 4K and this
+# writes to the Pi's SD card, so default to a usable handful; AERIAL_MAX=0
+# fetches everything.
+MAX="${AERIAL_MAX:-12}"
 KEY="url-4K-SDR"; [ "$RES" = "1080" ] && KEY="url-1080-H264"
 MANIFEST="${AERIAL_MANIFEST:-https://raw.githubusercontent.com/kopiro/xscreensaver-apple-aerial/main/entries.json}"
 mkdir -p "$OUT"

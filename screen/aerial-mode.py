@@ -44,7 +44,8 @@ from datetime import datetime
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 AERIAL_DIR = os.environ.get("AERIAL_DIR", os.path.join(REPO, "data/hub/aerials"))
 DASH_URL = os.environ.get(
-    "AERIAL_DASH_URL", "http://localhost:8080/dashboard?host=pi5&overlay=1")
+    "AERIAL_DASH_URL",
+    f"http://localhost:8080/dashboard?host={socket.gethostname()}&overlay=1")
 DRM_MODE = os.environ.get("AERIAL_DRM_MODE", "3")   # 3 = 3840x2160@29.97 (matches the 30fps clips)
 IPC = os.environ.get("AERIAL_IPC", "/tmp/mpv-aerial-mode")
 REFRESH = int(os.environ.get("AERIAL_REFRESH", "60"))   # overlay redraw cadence (s)

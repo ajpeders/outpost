@@ -12,9 +12,26 @@ Three services, all host-networked:
 | `appletv` | 8010 | Control the Apple TV over pyatv (Companion): remote buttons, now-playing, **list/launch apps**, power, AirPlay stream, volume. Web remote at `/`. |
 | `cec` | 8020 | Control the **TV set** over HDMI-CEC: power, volume, input/source switching. |
 
-Two pieces run on the **host** rather than in Docker, because they need to be DRM
-master on the console or outlive the stack: the mpv screen player + ambient
-dashboard (systemd, see below) and the homelab watchdog (cron).
+The mpv screen player and ambient dashboard run on the **host** rather than in
+Docker (they need to be DRM master on the console) — see below.
+
+## Requirements
+
+- **A Raspberry Pi 5** running Raspberry Pi OS (Bookworm). A Pi 4 mostly works,
+  but the 4K aerial dashboard assumes Pi 5 hardware decode.
+- **Docker + Compose v2** — `curl -fsSL https://get.docker.com | sh`.
+- **A CEC-capable TV** with CEC turned on in its menus (Samsung Anynet+, Sony
+  Bravia Sync, LG SimpLink, …) and a `/dev/cec0` node on the Pi. Without it the
+  `cec` container will not start; see the CEC section below.
+- **An Apple TV** on the same LAN. `ATV_ADDRESS` is required — the `appletv`
+  service exits at startup without it.
+- *Optional:* a Plex Media Server, and any HLS livestream URL.
+
+For the host-side dashboard/player only:
+
+```sh
+sudo apt install -y mpv chromium-browser cage ffmpeg v4l-utils python3 curl
+```
 
 ## Features
 
@@ -43,8 +60,8 @@ dashboard (systemd, see below) and the homelab watchdog (cron).
 - **Health panel** — `/api/health` surfaces per-service status, disk, CPU temp,
   load, and uptime in the UI.
 - **Installable (PWA)** — "Add to Home Screen" gives it an app-like launch.
-- **Off-homelab** — runs entirely on the Pi; survives homelab reboots. A cron
-  watchdog even alerts when the *homelab* goes down (see below).
+- **Runs standalone** — everything lives on the Pi, so it keeps working when the
+  rest of your network doesn't.
 
 ## Deploy to the Pi
 
@@ -64,6 +81,14 @@ Everything past `ATV_ADDRESS` is optional and env-driven (see `.env.example`):
 card, `HOMELAB_SSH` the server-stats line on the dashboard. Leave any of them
 blank to turn that feature off. `TZ` sets the wall-clock zone alarms fire in.
 
+Check it came up with `curl -s localhost:8080/api/health`, or run the bundled
+smoke-tester, which exercises the appletv + cec endpoints and prints each
+result: `python3 test-client.py`.
+
+> On some older Docker builds on the Pi, BuildKit fails to build these images.
+> If `docker compose build` errors out, prefix it: `DOCKER_BUILDKIT=0 docker
+> compose build`.
+
 ## On-TV dashboard (host services, optional)
 
 The ambient dashboard + local mpv player run on the Pi **host** (not Docker) —
@@ -76,9 +101,23 @@ sudo systemctl enable --now screen-player
 sudo systemctl enable --now aerial-screen   # OR kiosk-screen — pick one
 ```
 
-`SCREEN_MEDIA_ROOT` (in the unit's environment or `.env`) points the file/shuffle
-sources at your media; `aerial-screen` needs clips fetched once via
-`screen/fetch-aerials.sh`.
+These are systemd units running as root, and they do **not** read `.env` — that
+file is for Docker Compose only. To point the file/shuffle sources at your media,
+set `SCREEN_MEDIA_ROOT` in the unit itself (`systemctl edit screen-player`, then
+`Environment=SCREEN_MEDIA_ROOT=/path/to/media`). The same applies to the other
+`SCREEN_*` / `AERIAL_*` knobs documented at the top of each script.
+
+`aerial-screen` needs clips fetched once via `screen/fetch-aerials.sh` — it pulls
+12 by default; `AERIAL_MAX=0` grabs Apple's whole catalogue, which is tens of GB
+at 4K, onto your SD card. `RES=1080` downscales.
+
+`kiosk-screen` additionally wants `sudo screen/install-cursor.sh` once, or a
+stuck mouse pointer sits in the middle of the TV.
+
+The DRM mode indices (`SCREEN_DRM_MODE`, `AERIAL_DRM_MODE`) are **specific to the
+display's mode list** — the committed defaults match the author's TV. If you get
+a black screen or the wrong refresh rate, list your modes with
+`modetest -c` (from `libdrm-tests`) and set the matching index.
 
 ## Apple TV pairing (one-time)
 
@@ -86,11 +125,17 @@ Companion needs a one-time PIN pairing (shown on the TV). Credentials persist to
 `data/appletv/pyatv.conf`.
 
 ```sh
+# .env is read by Compose, not your shell — pass the IP literally, or source it:
+set -a; . ./.env; set +a
+
 docker exec -it appletv \
   atvremote --scan-hosts "$ATV_ADDRESS" \
             --storage-filename /data/pyatv.conf \
             --protocol companion pair
 ```
+
+The hub UI also exposes pairing under its Pairing panel, which is usually easier
+than the CLI.
 
 ## Apps on the Apple TV
 
@@ -121,17 +166,25 @@ curl -sX POST http://<pi>:8020/api/tv/on
 curl -sX POST http://<pi>:8020/api/tv/volume/up
 ```
 
-If `/api/status` reports no adapter: confirm `/dev/cec0` exists on the Pi
-(`ls /dev/cec*`), that the TV's CEC is enabled (Anynet+/Bravia Sync/SimpLink/…),
-and that the Pi is on an HDMI input the TV can see.
+If the `cec` container refuses to start at all, the host has no `/dev/cec0` to
+bind. Check with `ls /dev/cec*` — if yours enumerates as `cec1`, set
+`CEC_ADAPTER=/dev/cec1` in `.env`. If there's no node at all, CEC isn't enabled:
+you need `dtoverlay=vc4-kms-v3d` in `/boot/firmware/config.txt` and a reboot.
 
-## Homelab watchdog
+If `/api/status` reports no adapter: confirm the TV's CEC is enabled
+(Anynet+/Bravia Sync/SimpLink/…), and that the Pi is on an HDMI input the TV can
+see.
 
-`watchdog/watchdog.sh` (cron, every 5 min) is the outside observer for the
-homelab: pings the server + ween-arch and checks two ingress URLs, alerting
-via **ntfy.sh upstream** — not the homelab ntfy, which dies with the server.
-The secret topic name is the credential and lives in `data/watchdog/topic`
-(gitignored). Alerts fire once on down (re-notify daily), one-shot on
-recovery; state + log in `data/watchdog/`. Publish falls back to resolving
-ntfy.sh via Cloudflare DoH at 1.1.1.1, since the Pi's primary DNS is AdGuard
-on the homelab itself.
+## Repo layout
+
+`hub/`, `appletv/`, `cec/` are the three containers; `screen/` holds the
+host-side player, dashboard, and their systemd units; `data/` is runtime state
+(gitignored).
+
+`ROADMAP.md` is the author's build log rather than user documentation, and
+`CLAUDE.md` is instructions for AI coding agents working in this repo — neither
+is needed to run the stack.
+
+## License
+
+MIT — see [LICENSE](LICENSE).

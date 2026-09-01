@@ -25,7 +25,7 @@ from zoneinfo import ZoneInfo
 _LOGGER = logging.getLogger("hub.alarms")
 ALARMS_FILE = os.environ.get("ALARMS_FILE", "/data/alarms.json")
 # Alarm times are wall-clock in this zone (tzdata pip pkg supplies the data).
-_TZ = ZoneInfo(os.environ.get("TZ", "America/Denver"))
+_TZ = ZoneInfo(os.environ.get("TZ") or "UTC")
 
 # app bundle id for the tvOS Music app (Apple Music)
 APPLE_MUSIC_BUNDLE = os.environ.get("APPLE_MUSIC_BUNDLE", "com.apple.TVMusic")

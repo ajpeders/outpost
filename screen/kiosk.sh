@@ -9,7 +9,7 @@ export WLR_RENDERER=pixman
 # Hide the pointer: wlroots draws its OWN default cursor sprite (the page's
 # cursor:none only kicks in once a pointer enters chromium, which never happens
 # with no mouse). Point the whole session at a fully-transparent cursor theme
-# (created by bin/install-cursor, run on deploy).
+# (created by screen/install-cursor.sh, run on deploy).
 export XCURSOR_THEME=transparent
 export XCURSOR_SIZE=24
 # This cage/wlroots build ignores XCURSOR_THEME and defaults to "Adwaita"; the

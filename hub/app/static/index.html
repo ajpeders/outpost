@@ -1191,7 +1191,7 @@ async function refresh() {
     setArtwork('');
     paintVolume(sd.volume, sd.muted);
     const u = decodeURIComponent(sd.url);
-    const isLive = sd.profile === 'live' || /\.m3u8|live\.thelunadog/i.test(u);
+    const isLive = sd.profile === 'live' || /\.m3u8/i.test(u);
     if (isLive) {
       setWatchActive('livestream');
       autoLibrary(false);

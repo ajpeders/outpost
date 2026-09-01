@@ -312,7 +312,7 @@ async function nowPlaying() {
     const s = await fetchJson('/api/screen/status', 2500);
     if (s.playing && s.url) {
       let title, sub = s.subtitle || 'On the Pi';
-      if (/\.m3u8|live\.thelunadog/i.test(s.url)) { title = s.title || 'Jetstream livestream'; }
+      if (/\.m3u8/i.test(s.url)) { title = s.title || 'Livestream'; }
       else {
         const p = decodeURIComponent(s.url).split('/').filter(Boolean);
         const file = p.pop() || ''; title = s.title || p.pop() || file.replace(/\.[^.]+$/, '');

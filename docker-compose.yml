@@ -34,8 +34,15 @@ services:
     logging: *default-logging
     environment:
       PORT: ${CEC_API_PORT:-8020}
+      TZ: ${TZ:-UTC}
+      CEC_ADAPTER: ${CEC_ADAPTER:-/dev/cec0}
+      # 0 = the TV itself, 5 = an audio system / soundbar
+      CEC_VOLUME_TARGET: ${CEC_VOLUME_TARGET:-0}
+      CEC_STATUS_TTL: ${CEC_STATUS_TTL:-45}
     devices:
-      - /dev/cec0:/dev/cec0           # the Pi 5 HDMI-CEC bus
+      # the HDMI-CEC bus. Must exist on the host or the container won't start;
+      # override the host side with CEC_ADAPTER if yours enumerates elsewhere.
+      - ${CEC_ADAPTER:-/dev/cec0}:/dev/cec0
 
   hub:
     container_name: hub
@@ -48,8 +55,15 @@ services:
       ATV_URL: http://localhost:${ATV_API_PORT:-8010}
       CEC_URL: http://localhost:${CEC_API_PORT:-8020}
       TZ: ${TZ:-UTC}                   # alarm times are wall-clock in this zone
+      # which TV HDMI port the Apple TV is on (CEC Set Stream Path target)
+      ATV_HDMI_INPUT: ${ATV_HDMI_INPUT:-3}
       PLEX_URL: ${PLEX_URL:-}
       PLEX_TOKEN: ${PLEX_TOKEN:-}
+      # stand the TV down if it's left on the idle dashboard overnight
+      AUTO_OFF: ${AUTO_OFF:-1}
+      AUTO_OFF_START_HOUR: ${AUTO_OFF_START_HOUR:-0}
+      AUTO_OFF_END_HOUR: ${AUTO_OFF_END_HOUR:-6}
+      AUTO_OFF_COOLDOWN: ${AUTO_OFF_COOLDOWN:-3600}
       # Pi-side mpv screen player (fallback) + the homelab jetstream broadcast.
       # JETSTREAM_URL is the plain HLS manifest — jetstream grants /hls/ to LAN
       # clients tokenless, so the AirPlaying Apple TV needs no auth in the URL.
@@ -61,6 +75,8 @@ services:
       JETSTREAM_COOKIE: ${JETSTREAM_COOKIE:-}
       # Homelab system stats over SSH (/api/homelab); empty disables the probe
       HOMELAB_SSH: ${HOMELAB_SSH:-}
+      HOMELAB_SSH_KEY: ${HOMELAB_SSH_KEY:-/ssh/id_ed25519}
+      HOMELAB_DISK: ${HOMELAB_DISK:-/mnt/storage}
     volumes:
       - ./data/hub:/data              # alarms.json + cached aerials live here
       - ./hub/app/static:/app/app/static   # serve dashboard/index edits without a rebuild

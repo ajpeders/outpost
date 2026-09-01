@@ -6,8 +6,8 @@ the TV set (CEC), hosts the hub app, and runs scheduled automations.
 
 ## Status
 
-- **Phase 0 — Pi online** ✅ Pi 5 up on the LAN (`pi5`, 192.168.0.219 / .220, same MAC).
-- **Phase 1 — Access + wifi** ✅ SSH access in; wifi up on `wlan0` (192.168.0.220),
+- **Phase 0 — Pi online** ✅ Pi 5 up on the LAN (static LAN address, same MAC).
+- **Phase 1 — Access + wifi** ✅ SSH access in; wifi up on `wlan0`,
   ethernet no longer required at the TV.
 - **Phase 2 — Deploy + validate** ✅ Stack deployed and running on the Pi
   (`docker compose`, 3 containers). Companion **paired** (app list + now-playing
@@ -191,7 +191,7 @@ the TV set (CEC), hosts the hub app, and runs scheduled automations.
   (load→CPU%, RAM%, media-pool disk, hottest sensor) alongside the existing
   latency / Plex-sessions / jetstream-live info. `openssh-client` in the hub
   image, `~/.ssh` mounted read-only at `/ssh`, `HOMELAB_SSH` env (empty disables
-  it). Overlay line reads e.g. `isis · 15ms · cpu 16% · ram 51% · 1.8/4.5T · 37°
+  it). Overlay line reads e.g. `server · 15ms · cpu 16% · ram 51% · 1.8/4.5T · 37°
   · Plex idle · ● <live title>`.
 - **Wifi drop fix** — the Pi kept becoming unreachable over SSH until a reboot:
   `wlan0` power-save was **on** (the brcmfmac radio naps through inbound
@@ -220,9 +220,9 @@ file* to the Apple TV's Plex app instead, which decodes 4K DV natively.
   `plex://preplay?metadataKey=…` deep link through the new
   `POST :8010/api/open_url` (pyatv accepts a URL in place of a bundle id) is
   taken by tvOS but ignored by the Plex app — nothing reaches the server.
-- Debugging channel that works: the Plex server log on isis shows exactly what
+- Debugging channel that works: the Plex server log on the Plex host shows exactly what
   the ATV app requests —
-  `docker exec plex sh -c "grep -a 192.168.0.39 '/config/…/Logs/Plex Media Server.log'"`.
+  `docker exec plex sh -c "grep -a <apple-tv-ip> '/config/…/Logs/Plex Media Server.log'"`.
   (pyatv `/api/state` reports the *now-playing* app, not the foreground one, so
   it can't confirm a launch.)
 - Library note: `_4k_archive` REMUXes weren't Plex-indexed, so the folder
@@ -287,6 +287,7 @@ Homelab keeps: heavy transcoding, storage, services.
 4. **Local voice / wake-word** control for the room.
 5. **Retro emulation** (RetroPie) at the TV.
 6. **Doorbell/camera feed → TV overlay** (vision + display).
+
 ## Make this usable by others (added 2026-08-27)
 
 - [x] Universalize the README / docs / code for outside users (2026-08-27):
@@ -300,3 +301,31 @@ Homelab keeps: heavy transcoding, storage, services.
   an env-config rundown + a host-services install section; `.env.example`
   documents the homelab/ssh/media vars. (`livingroom-pi:` rsync target noted as
   a user-defined SSH alias.)
+
+- [x] Second pass — legal, prerequisites, de-personalization (2026-08-28). An
+  audit found the repo still unusable by a stranger in four ways:
+  - **No LICENSE** — nobody had the legal right to use it. Now MIT.
+  - **Owner's LAN in code defaults** — `plex.py` defaulted `PLEX_URL` to the real
+    Plex server and `.env.example` shipped the real Apple TV IP as a pre-filled,
+    working-looking value, so a cloner who skipped editing had their Pi probing
+    someone else's network. Both blank now; `alarms.py` TZ default Denver → UTC;
+    the `live.thelunadog` livestream regex reduced to `.m3u8`; `aerial-mode.py`
+    uses `socket.gethostname()` instead of the hardcoded `pi5` room label.
+  - **`.env.example` promised things it couldn't deliver** — `ATV_HDMI_INPUT`,
+    `CEC_*`, `AUTO_OFF_*`, `HOMELAB_SSH_KEY`, `HOMELAB_DISK` were read by the
+    code but never forwarded by compose, so setting them did nothing. Now wired,
+    each with a default matching the code's — note several are parsed with
+    `int()`/`float()`, so a bare `${VAR:-}` passthrough would crash the hub at
+    import; compose's `:-` treats empty as unset, which keeps a blank `.env`
+    line safe.
+  - **README claimed `.env` configures the host services** — it does not; that
+    file is Compose-only and no unit has an `EnvironmentFile=`. Corrected to
+    `systemctl edit`, and the README gained a Requirements section (Pi 5, Docker,
+    CEC-capable TV, `apt install` line), a `/dev/cec0` troubleshooting path, the
+    fact that DRM mode indices are display-specific, and a note that `ROADMAP.md`
+    and `CLAUDE.md` are internal.
+  Also: `fetch-aerials.sh` defaulted to Apple's entire catalogue at 4K onto the
+  SD card (`AERIAL_MAX=0`) — now 12. The watchdog is untracked and gitignored,
+  its targets being purely the author's infrastructure. Verified by resolving
+  `docker compose config` against an unedited `.env.example`: every numeric var
+  non-empty, Plex correctly disabled, and the deployed values unchanged.
