@@ -17,9 +17,11 @@ Docker (they need to be DRM master on the console) — see below.
 
 ## Requirements
 
-- **A Raspberry Pi 5** running Raspberry Pi OS (Bookworm). A Pi 4 mostly works,
-  but the 4K aerial dashboard assumes Pi 5 hardware decode.
-- **Docker + Compose v2** — `curl -fsSL https://get.docker.com | sh`.
+- **A Raspberry Pi 5** running Raspberry Pi OS (Trixie; Bookworm also works). A
+  Pi 4 mostly works, but the 4K aerial dashboard assumes Pi 5 hardware decode.
+- **Docker + Compose v2.** On Trixie, Debian's own repo ships no Compose v2
+  plugin — install `docker-ce` + `docker-compose-plugin` from Docker's apt repo.
+  Exact commands are in [HOWTO.md](HOWTO.md#set-up-a-fresh-pi).
 - **A CEC-capable TV** with CEC turned on in its menus (Samsung Anynet+, Sony
   Bravia Sync, LG SimpLink, …) and a `/dev/cec0` node on the Pi. Without it the
   `cec` container will not start; see the CEC section below.
@@ -30,8 +32,11 @@ Docker (they need to be DRM master on the console) — see below.
 For the host-side dashboard/player only:
 
 ```sh
-sudo apt install -y mpv chromium-browser cage ffmpeg v4l-utils python3 curl
+sudo apt install -y mpv chromium-browser cage ffmpeg v4l-utils libdrm-tests python3 curl
 ```
+
+On Trixie the `chromium-browser` package installs the binary as `chromium`;
+`libdrm-tests` supplies `modetest` for finding your display's DRM mode index.
 
 ## Features
 
@@ -66,12 +71,14 @@ sudo apt install -y mpv chromium-browser cage ffmpeg v4l-utils python3 curl
 ## Deploy to the Pi
 
 ```sh
-# from this machine, once the Pi is on the LAN
-# (`pi` here is your own ~/.ssh/config host alias for the Pi):
-rsync -a --exclude .env --exclude data/ ~/livingroom-pi/ pi:~/livingroom-pi/
+# on the Pi (`pi` below is your own ~/.ssh/config host alias for it):
+git clone ssh://git@git.thelunadog.com:2222/alex/smarthome.git ~/projects/smarthome
 
-# on the Pi:
-cd ~/livingroom-pi
+# or push a working copy from this machine instead:
+rsync -a --exclude .env --exclude data/ ~/projects/smarthome/ pi:~/projects/smarthome/
+
+# then, on the Pi:
+cd ~/projects/smarthome
 cp .env.example .env && $EDITOR .env      # at minimum set ATV_ADDRESS
 docker compose up -d --build
 ```
