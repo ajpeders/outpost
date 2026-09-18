@@ -1,8 +1,9 @@
 # TV dashboard rework — design
 
-Date: 2026-09-18. Scope: the on-TV ambient screen (`hub/app/static/dashboard.html`)
-and the host services that display it. The phone controller (`index.html`) is
-out of scope.
+Date: 2026-09-18. Scope: the on-TV ambient screen (`hub/app/static/dashboard.html`),
+the mpv seconds overlay (`screen/aerial-clock.lua`), one hub constant, and the
+host services that display it. The phone controller (`index.html`) is out of
+scope.
 
 ## Why
 
@@ -28,7 +29,7 @@ An **info board** over Apple aerials: clock and date, current weather and a
 Pi now-playing when relevant. Aerial clips remain the visual point; the board
 sits in edge bands with the middle open.
 
-## Part 1 — baseline fixes (host, no code)
+## Part 1 — baseline fixes (host-side, no UI code)
 
 Done on the Pi before any UI work, while `curl localhost:9595/status` reports
 `"playing": false`.
@@ -37,12 +38,20 @@ Done on the Pi before any UI work, while `curl localhost:9595/status` reports
 2. `screen/fetch-aerials.sh` to refill `data/hub/aerials/` (12 clips, runs
    `classify-aerials.py` for `timeofday.json`).
 3. `sudo systemctl disable --now kiosk-screen && sudo systemctl enable --now aerial-screen`.
-4. Confirm `screen-player`'s `SCREEN_KIOSK_SERVICE` is `aerial-screen` so mpv
-   hands the display back to the right unit.
+4. Point the screen player at the right idle service. `screen_player.py`
+   defaults `SCREEN_KIOSK_SERVICE` to `kiosk-screen` and the unit does not
+   override it, so mpv would restart the wrong unit after playback. Add a
+   drop-in on the Pi with `sudo systemctl edit screen-player` containing
+   `[Service]` / `Environment=SCREEN_KIOSK_SERVICE=aerial-screen`, then
+   `sudo systemctl restart screen-player` (safe: nothing is playing). The
+   repo default stays `kiosk-screen` so other installs are unaffected; HOWTO
+   documents the drop-in.
 
 Success: `systemctl is-active aerial-screen` is `active`, `/tmp/aerial-ov.png`
 exists and refreshes each minute, the TV clock matches `docker exec hub date`,
-and no Chromium process stays above 20% CPU between renders.
+`systemctl show screen-player -p Environment` includes
+`SCREEN_KIOSK_SERVICE=aerial-screen`, and no Chromium process stays above
+20% CPU between renders.
 
 ## Part 2 — layout and visual system
 
@@ -50,92 +59,165 @@ and no Chromium process stays above 20% CPU between renders.
 
 ```
 ┌ top band ────────────────────────────────────────────────────────┐
-│ 9:41 PM                                              66°  ☁      │
+│ 9:41 [:ss] PM                                        66°  ☁      │
 │ Friday, September 18                     Cloudy · Denver         │
 ├ open middle (aerial visible) ────────────────────────────────────┤
 │                                                                  │
-├ bottom band: one CSS grid row of tiles ──────────────────────────┤
-│ [ Forecast (2fr) ][ Server (1fr) ][ Media (1fr) ][ Alarm (1fr) ] │
+├ bottom band: one flex row of tiles ──────────────────────────────┤
+│ [ Forecast (flex 2) ][ Server (1) ][ Media (1) ][ Alarm (1) ]    │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
-- **Top left:** clock ~9vw (was 15vw), AM/PM inline, date beneath.
-- **Top right:** icon, current temperature, condition and city.
-- **Bottom band:** `display: grid; grid-template-columns: 2fr 1fr 1fr 1fr`,
-  fixed gap, inside the same horizontal padding as the top band. Tiles are
-  dark glass: `rgba(5,7,13,.55)` fill, 1px `rgba(255,255,255,.14)` border,
-  radius 1.2vw. No `backdrop-filter` (headless render cost unverified; add
-  later only if a timed render stays under budget).
-  - **Forecast:** seven equal columns; day label, icon, hi and lo. Sized so
-    seven columns always fit the 2fr cell.
-  - **Server:** five labelled readouts in a row: latency, CPU, RAM, disk,
-    temp. CPU is `min(100, cpu_pct)`.
-  - **Media:** Plex line (idle / N streams, up to three titles) and
-    livestream line (red dot + title). Both lines ellipsize inside the tile.
-  - **Alarm:** next alarm time, relative day, source. Hidden when none;
-    the grid then drops to `2fr 1fr 1fr`.
-  - **Now playing (Pi):** when `/api/screen/status` reports playback, a
-    now-playing tile takes the alarm slot. Belt and braces: mpv normally
-    owns the display during playback.
-- **Type:** system sans stack (`-apple-system, "Segoe UI", system-ui,
-  sans-serif`) with `font-variant-numeric: tabular-nums` on clock and
-  readouts. All text white; existing text-shadow kept for the open areas.
-- **Icons:** keep the current inline monochrome SVG set.
-- **Non-overlay mode** (plain browser or kiosk fallback): static aurora
-  gradient only. The Unsplash photo rotation, `<video>` aerial path and the
-  Ken Burns animation are deleted.
+### Top band
+
+- **Left:** clock ~9vw (was 15vw). Order: hours:minutes, a seconds slot,
+  AM/PM, all on one baseline. Date beneath.
+- **Seconds slot.** The page keeps an empty inline `#sec` element of fixed
+  width (3 digits at the seconds font size) in overlay mode. The page never
+  fills it in overlay mode; mpv's `aerial-clock.lua` draws the live seconds
+  there. To keep the two aligned, implementation measures the `#sec`
+  bounding box in the 3840x2160 Playwright render and commits the resulting
+  centre-x, top-y and font size as the new `AERIAL_SEC_X/Y/FS` defaults in
+  `aerial-clock.lua`, and the lua font changes from `DejaVu Sans Mono` to
+  `DejaVu Sans` bold to match the page. In non-overlay mode the page fills
+  `#sec` itself each second, as today.
+- **Right:** icon, current temperature, condition and city.
+
+### Bottom band
+
+- `display: flex; gap: 1.2vw;` inside the same horizontal padding as the
+  top band. Forecast tile `flex: 2 1 0`, every other tile `flex: 1 1 0`.
+  A hidden tile is `display: none`, so the remaining tiles share the row
+  with no gap. This is the single reflow rule; there are no per-count
+  grid templates. If the forecast tile is hidden the others still share the
+  full width.
+- Tiles are dark glass: `rgba(5,7,13,.55)` fill, 1px `rgba(255,255,255,.14)`
+  border, radius 1.2vw. No `backdrop-filter` (render cost unverified; out of
+  scope).
+- **Forecast:** seven equal columns (`display: grid; grid-template-columns:
+  repeat(7, 1fr)`); day label, icon, hi and lo. Type sized so seven columns
+  fit the tile at 1080p and 4K. Hidden only if there is no weather at all
+  (fetch failed and no cache).
+- **Server:** five labelled readouts in a row: latency, CPU, RAM, disk, temp.
+  CPU is `min(100, cpu_pct)`. Rules from the `/api/homelab` shape:
+  - `up: false` → tile shows `<host> offline` and nothing else.
+  - `up: true`, `stats` null → tile shows host name and latency only.
+  - `stats.ok` → all five readouts. Missing individual values show `–`.
+  - Endpoint failed and no localStorage copy → tile hidden.
+- **Media:** Plex line (`Plex idle` / `Plex N streams`, then up to three
+  titles) and livestream line (red dot + title). Rules:
+  - Plex line shown when `plex.ok`; hidden when `plex.ok` is false.
+  - Live line shown when `live.ok && live.playing && live.title`.
+  - Tile hidden when neither line would show.
+  - Both lines ellipsize inside the tile.
+- **Alarm:** next alarm time, relative day, source. Hidden when none.
+- **Now playing (Pi):** when `/api/screen/status` reports `playing && url`, a
+  now-playing tile (title, subtitle) appears after the alarm tile. Kept by
+  user decision; in practice mpv owns the display during playback so this
+  is rarely visible.
+
+### Type and colour
+
+- Font stack `"DejaVu Sans", -apple-system, "Segoe UI", system-ui, sans-serif`.
+  DejaVu Sans is first because it is the only sans on the Pi (`fc-match
+  sans-serif` → DejaVu Sans), so the Pi render, the lua seconds, and any
+  Playwright run on a machine with DejaVu installed all agree.
+  `font-variant-numeric: tabular-nums` on the clock and readouts.
+- All text white; existing text-shadow kept for the open areas.
+- Icons: the current inline monochrome SVG set, unchanged.
+
+### Non-overlay mode
+
+Plain browser or a kiosk fallback: static aurora gradient only. The Unsplash
+photo rotation, the `<video>` aerial path and the Ken Burns animation are
+deleted. `screen/kiosk.sh` passes only `?host=`, so nothing depends on the
+removed `?bg=video` branch.
 
 ## Part 3 — data and refresh
 
-The overlay renderer (`screen/aerial-mode.py`) reloads the page once a
-minute and captures as soon as the clock and the weather temperature have
-text. That contract is preserved.
+### Overlay render contract (preserved)
+
+`screen/aerial-mode.py` reloads the page once a minute, then polls
+`OverlayRenderer._painted`, which captures as soon as **`#time`** has more
+than three characters of text and **`#wx-temp`** is not one of `''`, `–`,
+`-`. Both element ids and the `–` sentinel are preserved exactly. The new
+layout uses `–` as the universal empty state, which is compatible because
+`_painted` only inspects `#wx-temp`.
+
+Consequence: if weather is unavailable and there is no cache, `_painted`
+times out after 3 s and the renderer sleeps `SETTLE` (2 s) before capturing.
+The Part 5 warm-render budget therefore only applies when weather is
+available.
+
+### Fetching
 
 - On load the page fires weather, screen status, alarms and homelab
-  **in parallel** (one `Promise.allSettled`), instead of four staggered
-  timers.
+  concurrently and gathers them with one `Promise.allSettled`. Today the
+  four calls already start concurrently at script evaluation; the change
+  gives a single completion point and lets each tile decide shown/hidden
+  after its own result, without changing what `_painted` waits for.
+- The per-function refresh intervals (weather 15 min, screen 5 s, alarms
+  60 s, homelab 60 s) are kept for non-overlay mode, where the page is
+  long-lived. In overlay mode the page is reloaded every minute so they
+  rarely fire.
 - **Homelab is cache-first.** The server and media tiles render immediately
   from the last good `/api/homelab` response in `localStorage`
   (`livingroom-dashboard-homelab-v1`, 10 min max age) and update in place
-  when the fresh response arrives. This mirrors the existing weather cache
-  and keeps a 5 s cache-miss SSH probe from stalling the capture.
-- **Hub:** `HOMELAB_TTL` in `hub/app/main.py` goes from 20 s to 55 s so a
-  once-a-minute overlay almost always hits cache. Hub restart is safe during
-  playback.
-- Seconds stay hidden in overlay mode; `aerial-clock.lua` draws them.
+  when the fresh response arrives. This mirrors the weather cache and keeps
+  a 5 s cache-miss SSH probe from stalling the capture. Note: the
+  `_render_cold` fallback in `aerial-mode.py` uses a separate Chromium
+  profile (`/tmp/aerial-chrome-profile`), so that path will not see this
+  cache; acceptable.
+- **Hub:** `HOMELAB_TTL` in `hub/app/main.py` goes from 20 s to 120 s. The
+  overlay fetches about 63 s apart (60 s sleep plus render), so a 120 s TTL
+  serves every other overlay fetch from cache and halves SSH probes. The
+  localStorage copy, not the hub TTL, is what protects the capture. Hub
+  restart is safe during playback.
 - Weather and geolocation caching are unchanged.
 
 ## Part 4 — error handling
 
 - Every readout has an explicit empty state (`–`).
-- A tile hides when its endpoint fails or returns nothing useful; the grid
-  reflows so there is never a blank card.
-- Any text that can grow (live title, Plex titles, city) is ellipsized
-  inside its tile with `overflow: hidden; text-overflow: ellipsis;
-  white-space: nowrap`.
+- Tile show/hide rules are the ones in Part 2; a tile is either fully
+  populated per its rule or `display: none`, never blank.
+- Any text that can grow (live title, Plex titles, city, alarm label) is
+  ellipsized inside its tile with `overflow: hidden; text-overflow:
+  ellipsis; white-space: nowrap`.
 - Fetch timeouts stay as today (weather 7 s, screen 2.5 s, alarms 3 s,
   homelab 4 s).
 
 ## Part 5 — verification
 
-1. Playwright renders `/dashboard?overlay=1` against the live hub at
-   3840x2160 and 1920x1080. Assert no element's bounding box exceeds the
-   viewport and the forecast tile has seven children.
-2. Same page with a mocked empty `/api/homelab` and empty `/api/alarms`:
-   assert the grid is three columns and no blank tile is present.
-3. On the Pi: time one cold and one warm overlay render from the
-   `aerial-screen` journal; warm must stay under 3 s.
-4. Pull `/tmp/aerial-ov.png` from the Pi and inspect it visually.
-5. `top` on the Pi: no Chromium process above 20% CPU between renders.
+1. Playwright (from the dev box, DejaVu Sans installed) renders
+   `/dashboard?overlay=1` against the live hub at 3840x2160 and
+   1920x1080. Assert: forecast tile has seven children and
+   `scrollWidth <= clientWidth`; the bottom band's right edge equals the
+   top band's right edge; no tile's bounding box exceeds the viewport.
+2. Same page with `/api/homelab` and `/api/alarms` routed to empty
+   responses (Playwright `route`): assert the server, media and alarm tiles
+   are `display: none` and the forecast tile spans the full band width.
+3. Same page with `/api/weather` routed to a 502 and localStorage cleared:
+   assert the forecast tile is hidden and the other tiles span the band.
+4. Measure the `#sec` box in the 4K render and confirm the committed
+   `AERIAL_SEC_*` defaults match it.
+5. On the Pi: from the `aerial-screen` journal, one cold and one warm
+   overlay render; warm must stay under 3 s with weather available.
+6. Pull `/tmp/aerial-ov.png` from the Pi and inspect it, then confirm the
+   seconds land inside the `#sec` slot on the TV.
+7. `top` on the Pi: no Chromium process above 20% CPU between renders.
 
 ## Out of scope
 
 - Phone controller layout.
-- `backdrop-filter` blur on tiles (revisit after render timing).
+- `backdrop-filter` blur on tiles.
 - Any new data sources.
+- Changing the repo default of `SCREEN_KIOSK_SERVICE`.
 
 ## Docs to update in the same change
 
 - `ROADMAP.md`: a dated entry for the audit findings and this rework.
-- `README.md` / `HOWTO.md`: note that the aerial cache must be fetched after
-  a rebuild, and that the Pi host timezone must match `TZ`.
+- `ARCHITECTURE.md`: the dashboard/overlay pipeline section (seconds slot
+  contract, cache-first homelab, `_painted` ids).
+- `README.md` / `HOWTO.md`: the aerial cache must be fetched after a
+  rebuild, the Pi host timezone must match `TZ`, and the `screen-player`
+  drop-in for `SCREEN_KIOSK_SERVICE`.
