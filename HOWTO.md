@@ -44,6 +44,9 @@ python3 test-client.py                     # smoke-tests appletv + cec endpoints
 ```
 
 `GET /` on the `cec` service returns 404 by design — it has no root route.
+`test-client.py` exits nonzero if any request fails (connection error or non-2xx
+response), so it works as a CI smoke test; its own tests run offline with
+`python3 -m unittest discover -s tests -p test_client.py`.
 
 ## Restore onto a rebuilt Pi
 

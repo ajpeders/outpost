@@ -16,11 +16,12 @@ Mark a card complete only with its acceptance evidence; report changed files, ch
 run, and remaining limitations. These TODOs do not authorize deployment, publishing,
 live messages, or changes to production data.
 
-- [ ] **HOME-01 — Return a failing exit status from the smoke client on API failures** (ready)
+- [x] **HOME-01 — Return a failing exit status from the smoke client on API failures** ✅ *(2026-09-18)*
   - **Why:** test-client.py displays errors, but its request helpers discard success/failure outcomes.
   - **Start here:** test-client.py, HOWTO.md, tests/test_client.py (new).
   - **Do:** Track failures across the selected command’s HTTP requests and return nonzero for connection failures or non-2xx responses. Preserve readable output and the default read-only sweep. Add stdlib unittest cases using mocked urllib responses.
   - **Done when:** Run python3 -m unittest discover -s tests -p test_client.py. All-success exits 0; HTTP/connection failures exit nonzero, including one failure in a multi-request sweep. Tests never contact the Pi or issue hardware commands.
+  - **Evidence:** `test-client.py` counts failures and returns 1 (unknown command still 2); `tests/test_client.py` (7 stdlib unittests, mocked `urlopen`) passes. Live sweep exits 0; a dead endpoint exits 1.
 
 - [ ] **HOME-02 — Finish the already-built Plex-on-Apple-TV acceptance check** (blocked: Apple TV + Plex player advertising)
   - **Why:** Current priorities identify the on-device Advertise as Player toggle as the missing prerequisite.

@@ -95,7 +95,8 @@ because the on-TV dashboard clock is rendered by Chromium on the host.
 
 Check it came up with `curl -s localhost:8080/api/health`, or run the bundled
 smoke-tester, which exercises the appletv + cec endpoints and prints each
-result: `python3 test-client.py`.
+result: `python3 test-client.py`. It exits nonzero if any request fails, so it's
+usable as a CI check.
 
 > On some older Docker builds on the Pi, BuildKit fails to build these images.
 > If `docker compose build` errors out, prefix it: `DOCKER_BUILDKIT=0 docker

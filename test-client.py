@@ -52,7 +52,7 @@ def show(label: str, status, body: str) -> None:
     print(f"{mark} {label:<22} {color}HTTP {status}{RESET}\n{DIM}{body}{RESET}")
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--atv", default=os.environ.get("ATV_URL", "http://localhost:8010"))
@@ -60,15 +60,22 @@ def main() -> int:
     p.add_argument("cmd", nargs="?", default="sweep",
                    help="sweep|status|state|apps|launch|key|power|tv|vol|source")
     p.add_argument("arg", nargs="?", help="argument for launch/key/power/tv/vol/source")
-    a = p.parse_args()
+    a = p.parse_args(argv)
 
     atv, cec = a.atv.rstrip("/"), a.cec.rstrip("/")
+    failures = 0
+
+    def report(status, body, label):
+        nonlocal failures
+        if status is None or not (200 <= status < 300):
+            failures += 1
+        show(label, status, body)
 
     def G(base, path, label):
-        s, b = call("GET", base + path); show(label, s, b)
+        s, b = call("GET", base + path); report(s, b, label)
 
     def P(base, path, label):
-        s, b = call("POST", base + path); show(label, s, b)
+        s, b = call("POST", base + path); report(s, b, label)
 
     match (a.cmd, a.arg):
         case ("sweep", _):
@@ -93,7 +100,7 @@ def main() -> int:
             print("try: sweep | status | state | apps | launch <b> | key <k> | "
                   "power on|off | tv on|off | vol up|down|mute | source active|release")
             return 2
-    return 0
+    return 1 if failures else 0
 
 
 if __name__ == "__main__":
