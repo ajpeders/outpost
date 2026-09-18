@@ -37,8 +37,8 @@ Done on the Pi before any UI work, while `curl localhost:9595/status` reports
 1. `sudo timedatectl set-timezone America/Denver`.
 2. `screen/fetch-aerials.sh` to refill `data/hub/aerials/` (12 clips, runs
    `classify-aerials.py` for `timeofday.json`).
-3. `sudo systemctl disable --now kiosk-screen && sudo systemctl enable --now aerial-screen`.
-4. Point the screen player at the right idle service. `screen_player.py`
+3. Point the screen player at the right idle service **before** switching
+   units, so there is no window where a play request stops the wrong one. `screen_player.py`
    defaults `SCREEN_KIOSK_SERVICE` to `kiosk-screen` and the unit does not
    override it, so mpv would restart the wrong unit after playback. Add a
    drop-in on the Pi with `sudo systemctl edit screen-player` containing
@@ -46,6 +46,7 @@ Done on the Pi before any UI work, while `curl localhost:9595/status` reports
    `sudo systemctl restart screen-player` (safe: nothing is playing). The
    repo default stays `kiosk-screen` so other installs are unaffected; HOWTO
    documents the drop-in.
+4. `sudo systemctl disable --now kiosk-screen && sudo systemctl enable --now aerial-screen`.
 
 Success: `systemctl is-active aerial-screen` is `active`, `/tmp/aerial-ov.png`
 exists and refreshes each minute, the TV clock matches `docker exec hub date`,
@@ -73,13 +74,15 @@ exists and refreshes each minute, the TV clock matches `docker exec hub date`,
 - **Left:** clock ~9vw (was 15vw). Order: hours:minutes, a seconds slot,
   AM/PM, all on one baseline. Date beneath.
 - **Seconds slot.** The page keeps an empty inline `#sec` element of fixed
-  width (3 digits at the seconds font size) in overlay mode. The page never
+  width (three characters, `:SS`, at the seconds font size) in overlay mode. The page never
   fills it in overlay mode; mpv's `aerial-clock.lua` draws the live seconds
   there. To keep the two aligned, implementation measures the `#sec`
   bounding box in the 3840x2160 Playwright render and commits the resulting
   centre-x, top-y and font size as the new `AERIAL_SEC_X/Y/FS` defaults in
-  `aerial-clock.lua`, and the lua font changes from `DejaVu Sans Mono` to
-  `DejaVu Sans` bold to match the page. In non-overlay mode the page fills
+  `aerial-clock.lua` (the lua anchors with `\an8`, top-centre, which is why
+  centre-x and top-y are the values to commit). The lua file is
+  also changed from `DejaVu Sans Mono` to `DejaVu Sans` bold to match the
+  page. In non-overlay mode the page fills
   `#sec` itself each second, as today.
 - **Right:** icon, current temperature, condition and city.
 
@@ -101,7 +104,8 @@ exists and refreshes each minute, the TV clock matches `docker exec hub date`,
 - **Server:** five labelled readouts in a row: latency, CPU, RAM, disk, temp.
   CPU is `min(100, cpu_pct)`. Rules from the `/api/homelab` shape:
   - `up: false` → tile shows `<host> offline` and nothing else.
-  - `up: true`, `stats` null → tile shows host name and latency only.
+  - `up: true`, `stats` null or `!stats.ok` → tile shows host name and
+    latency only.
   - `stats.ok` → all five readouts. Missing individual values show `–`.
   - Endpoint failed and no localStorage copy → tile hidden.
 - **Media:** Plex line (`Plex idle` / `Plex N streams`, then up to three
@@ -110,7 +114,8 @@ exists and refreshes each minute, the TV clock matches `docker exec hub date`,
   - Live line shown when `live.ok && live.playing && live.title`.
   - Tile hidden when neither line would show.
   - Both lines ellipsize inside the tile.
-- **Alarm:** next alarm time, relative day, source. Hidden when none.
+- **Alarm:** next alarm time, relative day, source. Hidden when none; a
+  failed `/api/alarms` fetch counts as none, matching today's `catch`.
 - **Now playing (Pi):** when `/api/screen/status` reports `playing && url`, a
   now-playing tile (title, subtitle) appears after the alarm tile. Kept by
   user decision; in practice mpv owns the display during playback so this
@@ -152,14 +157,13 @@ available.
 ### Fetching
 
 - On load the page fires weather, screen status, alarms and homelab
-  concurrently and gathers them with one `Promise.allSettled`. Today the
-  four calls already start concurrently at script evaluation; the change
-  gives a single completion point and lets each tile decide shown/hidden
-  after its own result, without changing what `_painted` waits for.
+  concurrently, as it already does today at script evaluation. Each tile
+  decides shown/hidden from its own result; there is no combined
+  completion point, and `_painted` is unchanged.
 - The per-function refresh intervals (weather 15 min, screen 5 s, alarms
-  60 s, homelab 60 s) are kept for non-overlay mode, where the page is
-  long-lived. In overlay mode the page is reloaded every minute so they
-  rarely fire.
+  60 s, homelab 60 s) are kept as-is. In overlay mode the page lives about
+  60 s between reloads, so the 5 s screen poll fires a dozen times per
+  cycle; harmless and unchanged.
 - **Homelab is cache-first.** The server and media tiles render immediately
   from the last good `/api/homelab` response in `localStorage`
   (`livingroom-dashboard-homelab-v1`, 10 min max age) and update in place
@@ -193,11 +197,12 @@ available.
    1920x1080. Assert: forecast tile has seven children and
    `scrollWidth <= clientWidth`; the bottom band's right edge equals the
    top band's right edge; no tile's bounding box exceeds the viewport.
-2. Same page with `/api/homelab` and `/api/alarms` routed to empty
-   responses (Playwright `route`): assert the server, media and alarm tiles
-   are `display: none` and the forecast tile spans the full band width.
-3. Same page with `/api/weather` routed to a 502 and localStorage cleared:
-   assert the forecast tile is hidden and the other tiles span the band.
+2. Fresh browser context (no localStorage). `/api/homelab` and
+   `/api/alarms` routed to HTTP 502 via Playwright `route`: assert the
+   server, media and alarm tiles are `display: none` and the forecast tile
+   spans the full band width.
+3. Fresh browser context. `/api/weather` routed to HTTP 502: assert the
+   forecast tile is hidden and the other tiles span the band.
 4. Measure the `#sec` box in the 4K render and confirm the committed
    `AERIAL_SEC_*` defaults match it.
 5. On the Pi: from the `aerial-screen` journal, one cold and one warm
