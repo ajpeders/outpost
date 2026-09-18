@@ -85,13 +85,15 @@
   .fc .t .lo { font-weight: 500; opacity: .8; }
 
   /* server: five labelled readouts in a row */
-  .server-row { display: flex; justify-content: space-between; align-items: center; gap: 1.2vw;
-                flex: 1; min-width: 0; }
-  .stat { display: flex; flex-direction: column; align-items: center; min-width: 0; }
-  .stat .v { font-size: 1.25vw; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
-  .stat .k { font-size: .78vw; font-weight: 600; letter-spacing: .06em; text-transform: uppercase;
-             opacity: .6; white-space: nowrap; }
-  .server-note { font-size: 1.3vw; font-weight: 600; opacity: .9;
+  .server-row { display: flex; align-items: stretch; flex: 1; min-width: 0; }
+  .stat { flex: 1 1 0; display: flex; flex-direction: column; align-items: center;
+          justify-content: center; gap: .35vh; min-width: 0; padding: 0 .6vw; }
+  .stat + .stat { border-left: 1px solid rgba(255, 255, 255, .12); }
+  .stat .v { font-size: 1.3vw; font-weight: 700; line-height: 1.05;
+             font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .stat .k { font-size: .8vw; font-weight: 600; letter-spacing: .08em; text-transform: uppercase;
+             opacity: .55; white-space: nowrap; }
+  .server-note { font-size: 1.3vw; font-weight: 600; opacity: .9; align-self: center;
                  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
   /* media: Plex poster + Plex line + livestream (title, progress) */

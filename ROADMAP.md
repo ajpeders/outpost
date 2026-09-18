@@ -326,6 +326,10 @@ file* to the Apple TV's Plex app instead, which decodes 4K DV natively.
 3. **Real-listening validation** — exercise Plex queue next/prev/stop and Apple
    TV artwork during a real playlist session; ROADMAP still calls these out as
    verify-needed.
+4. **Look into music now-playing on the TV dashboard** — surface what's playing
+   (Apple Music via the Apple TV, and Plex music) on the dashboard overlay, not
+   just Pi media. The appletv service already exposes now-playing + artwork
+   (`/api/atv/artwork`), so the media/now-playing tile could show it.
 
 ## Dropped
 
