@@ -280,8 +280,9 @@ sizes. Implemented per
   by name; plus the livestream title with position/duration + a progress bar. The
   hub caches the last-good livestream state and serves it stale on a title-API
   blip so it persists.
-- **Server tile (2026-09-18):** label is `Server`; CPU shows the real load
-  (uncapped, can exceed 100%), disk is a percentage instead of used/total.
+- **Server tile (2026-09-18):** labelled with the host name; a 3x2 grid of
+  icon + value readouts (ping / CPU / RAM / disk% / temp / uptime). CPU is the
+  real load (uncapped, can exceed 100%), disk is a percentage.
 - **Simplification:** the Unsplash photo rotation, `<video>` aerial path and Ken
   Burns animation are removed; non-overlay is a static aurora gradient.
 

@@ -69,7 +69,8 @@
           border-radius: 1.2vw; padding: 1.6vh 1.2vw; }
   .tile.hidden { display: none; }
   .forecast { flex: 2 1 0; }
-  .server, .media, .alarm, .nowplaying { flex: 1 1 0; }
+  .server { flex: 1.2 1 0; container-type: inline-size; }
+  .media, .alarm, .nowplaying { flex: 1 1 0; }
   .tile-label { font-size: 1vw; font-weight: 700; letter-spacing: .14em; text-transform: uppercase;
                 opacity: .65; margin-bottom: .9vh; white-space: nowrap; overflow: hidden;
                 text-overflow: ellipsis; }
@@ -84,16 +85,15 @@
   .fc .t { font-size: 1vw; font-weight: 700; white-space: nowrap; font-variant-numeric: tabular-nums; }
   .fc .t .lo { font-weight: 500; opacity: .8; }
 
-  /* server: five labelled readouts in a row */
-  .server-row { display: flex; align-items: stretch; flex: 1; min-width: 0; }
-  .stat { flex: 1 1 0; display: flex; flex-direction: column; align-items: center;
-          justify-content: center; gap: .35vh; min-width: 0; padding: 0 .6vw; }
-  .stat + .stat { border-left: 1px solid rgba(255, 255, 255, .12); }
-  .stat .v { font-size: 1.3vw; font-weight: 700; line-height: 1.05;
-             font-variant-numeric: tabular-nums; white-space: nowrap; }
-  .stat .k { font-size: .8vw; font-weight: 600; letter-spacing: .08em; text-transform: uppercase;
-             opacity: .55; white-space: nowrap; }
-  .server-note { font-size: 1.3vw; font-weight: 600; opacity: .9; align-self: center;
+  /* server: five labelled readouts on one line */
+  /* server: 3x2 grid of icon + value readouts (cqi so it scales with the tile) */
+  .server-row { display: grid; grid-template-columns: repeat(3, 1fr); align-content: center;
+                gap: 1.5vh 2.6cqi; flex: 1; min-width: 0; }
+  .metric { display: flex; align-items: center; gap: 1.4cqi; min-width: 0; }
+  .metric .ic { font-size: 7cqi; line-height: 1; opacity: .7; flex: none; }
+  .metric .v { font-size: 6cqi; font-weight: 700; font-variant-numeric: tabular-nums;
+               white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .server-note { grid-column: 1 / -1; font-size: 6cqi; font-weight: 600; opacity: .9;
                  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
   /* media: Plex poster + Plex line + livestream (title, progress) */
@@ -201,6 +201,12 @@ const ICONS = {
   dot:'<svg viewBox="0 0 24 24"><circle class="fill" cx="12" cy="12" r="2"/></svg>',
   alarm:'<svg viewBox="0 0 24 24"><circle cx="12" cy="13" r="6.5"/><path d="M12 10v3l2 1.3M5.5 6.5 3.2 4.6M18.5 6.5l2.3-1.9M7.6 18.6 6 20.6M16.4 18.6 18 20.6"/></svg>',
   server:'<svg viewBox="0 0 24 24"><rect x="4" y="4.5" width="16" height="6.2" rx="1.4"/><rect x="4" y="13.3" width="16" height="6.2" rx="1.4"/><circle class="fill" cx="7.4" cy="7.6" r=".9"/><circle class="fill" cx="7.4" cy="16.4" r=".9"/></svg>',
+  ping:'<svg viewBox="0 0 24 24"><path d="M3 12h4l2-5 4 10 2-5h6"/></svg>',
+  cpu:'<svg viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="1.5"/><path d="M10 3v3M14 3v3M10 18v3M14 18v3M3 10h3M3 14h3M18 10h3M18 14h3"/></svg>',
+  ram:'<svg viewBox="0 0 24 24"><rect x="3" y="7" width="18" height="9" rx="1.5"/><path d="M7 16v3M12 16v3M17 16v3M7 10v3M10.5 10v3M14 10v3"/></svg>',
+  disk:'<svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="12" cy="12" r="4"/><circle class="fill" cx="12" cy="12" r="1"/></svg>',
+  temp:'<svg viewBox="0 0 24 24"><path d="M12 4a2 2 0 0 1 2 2v7a4 4 0 1 1-4 0V6a2 2 0 0 1 2-2z"/><circle class="fill" cx="12" cy="17" r="1.5"/></svg>',
+  uptime:'<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 7.5V12l3 1.8"/></svg>',
 };
 const iconHTML = k => '<span class="icon">' + (ICONS[k] || ICONS.dot) + '</span>';
 const WCODE = {  // open-meteo weather codes -> [icon key, label]
@@ -396,17 +402,22 @@ function fmtClock(s) {
   const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
   return (h ? h + ':' + String(m).padStart(2, '0') : String(m)) + ':' + String(sec).padStart(2, '0');
 }
-function stat(v, k) {
-  const d = document.createElement('div'); d.className = 'stat';
-  d.innerHTML = '<div class="v">' + (v == null || v === '' ? DASH : v) + '</div>'
-              + '<div class="k">' + k + '</div>';
+function fmtUptime(s) {
+  if (s == null) return DASH;
+  const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600), m = Math.floor((s % 3600) / 60);
+  return d ? d + 'd' : h ? h + 'h' : m + 'm';
+}
+function stat(v, icon) {
+  const d = document.createElement('span'); d.className = 'metric';
+  d.innerHTML = '<span class="ic">' + iconHTML(icon) + '</span><span class="v">'
+              + (v == null || v === '' ? DASH : v) + '</span>';
   return d;
 }
 function renderHomelab(h) {
   // server tile
   const row = el.serverRow;
   row.replaceChildren();
-  el.serverLabel.textContent = 'Server';
+  el.serverLabel.textContent = (h && h.stats && h.stats.hostname) || 'Server';
   if (!h || !h.up) {
     const note = document.createElement('div');
     note.className = 'server-note';
@@ -423,6 +434,7 @@ function renderHomelab(h) {
         stat(s.mem_pct != null ? s.mem_pct + '%' : DASH, 'ram'),
         stat(s.disk_pct != null ? s.disk_pct + '%' : DASH, 'disk'),
         stat(s.temp_c != null ? s.temp_c + '°' : DASH, 'temp'),
+        stat(fmtUptime(s.uptime_s), 'uptime'),
       );
     } else {
       const note = document.createElement('div');

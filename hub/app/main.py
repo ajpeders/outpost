@@ -909,10 +909,12 @@ HOMELAB_SSH = os.environ.get("HOMELAB_SSH", "")
 HOMELAB_SSH_KEY = os.environ.get("HOMELAB_SSH_KEY", "/ssh/id_ed25519")
 HOMELAB_DISK = os.environ.get("HOMELAB_DISK", "/mnt/storage")  # media pool mount
 _HOMELAB_STATS_CMD = (
+    "cat /proc/sys/kernel/hostname; "
     "cut -d' ' -f1 /proc/loadavg; nproc; "
     "free -m | awk '/^Mem:/{{print $3, $2}}'; "
     "(df -m {disk} 2>/dev/null || df -m /) | awk 'NR==2{{print $3, $2}}'; "
-    "sort -nr /sys/class/thermal/thermal_zone*/temp 2>/dev/null | head -1"
+    "sort -nr /sys/class/thermal/thermal_zone*/temp 2>/dev/null | head -1; "
+    "cut -d. -f1 /proc/uptime"
 )
 
 
@@ -929,18 +931,20 @@ async def _homelab_stats():
             HOMELAB_SSH, _HOMELAB_STATS_CMD.format(disk=HOMELAB_DISK),
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
         out, _ = await asyncio.wait_for(proc.communicate(), timeout=6.0)
-        load_s, cores_s, mem_s, disk_s, temp_s = out.decode().splitlines()[:5]
+        host, load_s, cores_s, mem_s, disk_s, temp_s, uptime_s = out.decode().splitlines()[:7]
         load, cores = float(load_s), int(cores_s)
         mem_used, mem_total = map(int, mem_s.split())
         disk_used, disk_total = map(int, disk_s.split())
         return {"ok": True,
+                "hostname": host.strip(),
                 "load": load, "cores": cores,
                 "cpu_pct": round(100 * load / cores),
                 "mem_pct": round(100 * mem_used / mem_total),
                 "disk_used_tb": round(disk_used / 1024 / 1024, 1),
                 "disk_total_tb": round(disk_total / 1024 / 1024, 1),
                 "disk_pct": round(100 * disk_used / disk_total),
-                "temp_c": round(int(temp_s) / 1000)}
+                "temp_c": round(int(temp_s) / 1000),
+                "uptime_s": int(uptime_s)}
     except Exception:  # noqa: BLE001 - status must never throw
         return {"ok": False}
 # share-relative library prefix -> (Plex section, item type) as mounted on the

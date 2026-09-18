@@ -113,8 +113,9 @@ in `localStorage` (10 min) so a slow probe never stalls the capture; the hub's
 the livestream title looked up in Plex by name, plus the livestream title with
 position/duration and a progress bar; the hub keeps the last good livestream
 state (`_live_cache`) and serves it stale when the title API blips, so the line
-persists instead of vanishing. The server tile reads ping / CPU / RAM / disk% /
-temp; CPU is the real load figure (may exceed 100% on an over-subscribed box). Non-overlay mode is a static aurora
+persists instead of vanishing. The server tile (labelled with the host's name)
+shows a 3x2 grid of icon + value readouts — ping / CPU / RAM / disk% / temp /
+uptime; CPU is the real load figure (may exceed 100% on an over-subscribed box). Non-overlay mode is a static aurora
 gradient — the Unsplash rotation, `<video>` aerials and Ken Burns animation were
 removed.
 
