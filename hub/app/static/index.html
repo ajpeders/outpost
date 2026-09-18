@@ -186,6 +186,10 @@
   .music-row .m-sub { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .music-row button { min-height: 44px; padding: 5px 13px; border-radius: var(--radius); background: var(--accent); color: #fff; font-size: 12px; font-weight: 750; }
   .music-row.has-atv { grid-template-columns: minmax(0, 1fr) auto auto; }
+  .music-row.dual { grid-template-columns: minmax(0, 1fr) auto auto; }
+  .music-row.has-art { grid-template-columns: auto minmax(0, 1fr) auto; }
+  .music-row.has-art.has-atv { grid-template-columns: auto minmax(0, 1fr) auto auto; }
+  .music-row .m-art { width: 40px; height: 60px; object-fit: cover; border-radius: 6px; background: rgba(255, 255, 255, .06); display: block; }
   .music-stop { width: 100%; min-height: 44px; border-radius: var(--radius); margin-top: 10px; }
 
   /* --- Alarms --- */
@@ -958,7 +962,7 @@ async function loadResume() {
   node.innerHTML = '';
   entries.forEach(e => {
     const row = document.createElement('div');
-    row.className = 'music-row';
+    row.className = 'music-row dual';
     row.innerHTML = '<div><div class="m-title">' + esc(e.name) + '</div>'
       + '<div class="m-sub">Continue at ' + fmtT(e.position) + '</div></div>';
     const b = document.createElement('button');
@@ -969,6 +973,19 @@ async function loadResume() {
       if (!x.ok) toast(x.data?.error || 'play failed');
     };
     row.appendChild(b);
+    const c = document.createElement('button');
+    c.textContent = '✕';
+    c.title = 'Remove from Continue watching';
+    c.setAttribute('aria-label', 'Remove from Continue watching');
+    c.style.background = 'var(--surface-3)';
+    c.onclick = async () => {
+      const x = await api('POST', '/api/media/resume/forget', { path: e.path });
+      if (!x.ok) { toast(x.data?.error || 'Cancel failed'); return; }
+      toast('Removed ' + e.name);
+      resumeSig = null;
+      loadResume();
+    };
+    row.appendChild(c);
     node.appendChild(row);
   });
   node.classList.remove('hidden');
@@ -1081,10 +1098,20 @@ loadScenes();
 
 /* --- media library (SMB share) --- */
 let mediaLoaded = false, mediaPath = '';
-function mediaRow(label, kind, onClick, onAtv) {
+function mediaRow(label, kind, onClick, onAtv, poster) {
   const row = document.createElement('div');
   row.className = 'music-row';
   row.innerHTML = '<div class="m-title">' + esc(label) + '</div>';
+  if (poster) {
+    row.classList.add('has-art');
+    const img = document.createElement('img');
+    img.className = 'm-art';
+    img.alt = '';
+    img.loading = 'lazy';
+    img.src = poster;
+    img.onerror = () => { img.remove(); row.classList.remove('has-art'); };
+    row.insertBefore(img, row.firstChild);
+  }
   if (onAtv) {
     // second action: play through the Apple TV's Plex app (real 4K HDR/DV
     // hardware; the Pi caps HDR output at 1080p)
@@ -1104,36 +1131,85 @@ function mediaRow(label, kind, onClick, onAtv) {
   if (kind !== 'file') { row.style.cursor = 'pointer'; row.onclick = onClick; }
   return row;
 }
+function seasonRow(n, count, showPath) {
+  const row = document.createElement('div');
+  row.className = 'music-row';
+  row.innerHTML = '<div><div class="m-title">Season ' + n + '</div>'
+    + '<div class="m-sub">' + count + ' episode' + (count === 1 ? '' : 's') + '</div></div>';
+  const open = () => loadMedia('#season:' + n + '|' + showPath);
+  const b = document.createElement('button');
+  b.textContent = 'Open';
+  b.style.background = 'var(--surface-3)';
+  b.onclick = ev => { ev.stopPropagation(); open(); };
+  row.appendChild(b);
+  row.style.cursor = 'pointer';
+  row.onclick = open;
+  return row;
+}
 async function loadMedia(path) {
   const node = $('#media-list');
   node.innerHTML = '<span class="muted">Loading…</span>';
-  const r = await api('GET', '/api/media/list?path=' + encodeURIComponent(path || ''));
+  // A virtual "season folder": show one season of a flat show folder.
+  let seasonFilter = null, showPath = path;
+  const sm = /^#season:(\d+)\|(.*)$/.exec(path || '');
+  if (sm) { seasonFilter = +sm[1]; showPath = sm[2]; }
+  const r = await api('GET', '/api/media/list?path=' + encodeURIComponent(showPath || ''));
   node.innerHTML = '';
-  mediaPath = path || '';
+  mediaPath = showPath || '';
   if (!r.ok) { node.innerHTML = '<span class="muted">' + esc(r.data?.error || 'unavailable') + '</span>'; return; }
-  if (path) {
-    const parent = path.split('/').slice(0, -1).join('/');
+  const entries = r.data.entries || [];
+  const seasonOf = n => { const m = /(?:^|[^a-z0-9])s(\d{1,2})e\d{1,3}/i.exec(n); return m ? +m[1] : null; };
+  const episodeOf = n => { const m = /s\d{1,2}e(\d{1,3})/i.exec(n); return m ? +m[1] : 0; };
+  const dirRow = e => mediaRow(e.name, 'dir', () => loadMedia(e.path), null, e.poster);
+  const fileRow = e => mediaRow(e.name, 'file', async () => {
+    toast('Playing ' + e.name);
+    const x = await api('POST', '/api/media/play', { path: e.path });
+    if (!x.ok) toast(x.data?.error || 'play failed');
+  }, async btn => {
+    btn.disabled = true; btn.textContent = '…';
+    toast('Sending to the Apple TV — Plex is launching…');
+    const x = await api('POST', '/api/plex/play_on_atv', { path: e.path });
+    btn.disabled = false; btn.textContent = 'ATV';
+    if (!x.ok) { toast(x.data?.detail || x.data?.error || 'Apple TV play failed'); return; }
+    toast('Playing on Apple TV: ' + (x.data.title || e.name)
+          + (x.data.resolution ? ' (' + x.data.resolution + ')' : ''));
+  }, e.poster);
+
+  if (seasonFilter !== null) {                 // inside a season folder
+    node.appendChild(mediaRow('Back', 'back', () => loadMedia(showPath)));
+    entries.filter(e => e.type === 'file' && seasonOf(e.name) === seasonFilter)
+      .sort((a, b) => episodeOf(a.name) - episodeOf(b.name))
+      .forEach(e => node.appendChild(fileRow(e)));
+    mediaLoaded = true;
+    return;
+  }
+
+  if (showPath) {
+    const parent = showPath.split('/').slice(0, -1).join('/');
     node.appendChild(mediaRow('Back', 'back', () => loadMedia(parent)));
   }
-  (r.data.entries || []).forEach(e => {
-    if (e.type === 'dir') {
-      node.appendChild(mediaRow(e.name, 'dir', () => loadMedia(e.path)));
-    } else {
-      node.appendChild(mediaRow(e.name, 'file', async () => {
-        toast('Playing ' + e.name);
-        const x = await api('POST', '/api/media/play', { path: e.path });
-        if (!x.ok) toast(x.data?.error || 'play failed');
-      }, async btn => {
-        btn.disabled = true; btn.textContent = '…';
-        toast('Sending to the Apple TV — Plex is launching…');
-        const x = await api('POST', '/api/plex/play_on_atv', { path: e.path });
-        btn.disabled = false; btn.textContent = 'ATV';
-        if (!x.ok) { toast(x.data?.detail || x.data?.error || 'Apple TV play failed'); return; }
-        toast('Playing on Apple TV: ' + (x.data.title || e.name)
-              + (x.data.resolution ? ' (' + x.data.resolution + ')' : ''));
-      }));
-    }
-  });
+
+  // TV shows: episodes are usually flat in the show folder, named SxxExx.
+  // Present those as one folder per season instead of a long flat list.
+  const files = entries.filter(e => e.type === 'file');
+  const seasoned = files.filter(e => seasonOf(e.name) !== null);
+  const grouped = seasoned.length >= 2 && seasoned.length >= files.length * 0.6;
+
+  if (grouped) {
+    entries.filter(e => e.type === 'dir').forEach(e => node.appendChild(dirRow(e)));
+    const bySeason = new Map();
+    files.forEach(e => {
+      const k = seasonOf(e.name); const key = k === null ? Infinity : k;
+      if (!bySeason.has(key)) bySeason.set(key, []);
+      bySeason.get(key).push(e);
+    });
+    [...bySeason.keys()].sort((a, b) => a - b).forEach(k => {
+      if (k === Infinity) bySeason.get(k).forEach(e => node.appendChild(fileRow(e)));
+      else node.appendChild(seasonRow(k, bySeason.get(k).length, showPath));
+    });
+  } else {
+    entries.forEach(e => node.appendChild(e.type === 'dir' ? dirRow(e) : fileRow(e)));
+  }
   mediaLoaded = true;
 }
 

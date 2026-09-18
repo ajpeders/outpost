@@ -7,9 +7,10 @@
 <style>
   :root { color-scheme: dark; }
   * { margin: 0; padding: 0; box-sizing: border-box; cursor: none !important; }
+  .hidden { display: none !important; }
   html, body { height: 100%; overflow: hidden; }
   body {
-    font-family: "DejaVu Sans Mono", "JetBrains Mono", "Cascadia Code", ui-monospace, Menlo, Consolas, monospace;
+    font-family: "DejaVu Sans", -apple-system, "Segoe UI", system-ui, sans-serif;
     color: #fff;
     background: #05070d;
     -webkit-font-smoothing: antialiased;
@@ -26,136 +27,166 @@
   /* overlay mode (?overlay=1): transparent page so mpv can composite the widgets
      over a hardware-decoded aerial video underneath (headless-rendered PNG). */
   body.overlay { background: transparent !important; }
-  body.overlay #aurora, body.overlay .bg, body.overlay .vid { display: none !important; }
+  body.overlay #aurora { display: none !important; }
   body.overlay::after { display: none !important; }
   body.overlay .shell { text-shadow: 0 2px 18px rgba(0,0,0,.7); }
-  body.overlay .sec { display: none; }   /* overlay refreshes per-minute, not per-second */
 
-  /* ambient background: rotating scenic photo with a slow drift, over an aurora gradient */
-  .bg, #aurora { position: fixed; inset: 0; z-index: -2; }
+  /* ambient background: static aurora gradient (non-overlay fallback only) */
   #aurora {
-    z-index: -3;
+    position: fixed; inset: 0; z-index: -3;
     background:
       radial-gradient(60% 80% at 20% 20%, #16324d 0%, transparent 60%),
       radial-gradient(60% 80% at 85% 15%, #0e3b3a 0%, transparent 55%),
       radial-gradient(80% 90% at 70% 90%, #241636 0%, transparent 60%),
       linear-gradient(160deg, #060a14, #05070d);
-    /* static — an animated full-screen filter here starves the software video
-       decoder (the Pi has no GL for chromium), causing choppy aerials. */
   }
-  /* two layers that crossfade between photos (no hard flip) */
-  .bg {
-    background-size: cover; background-position: center;
-    opacity: 0; transform: scale(1.06);
-    transition: opacity 3s ease-in-out;
-    will-change: opacity, transform;
-  }
-  .bg.show { opacity: .55; animation: kenburns 120s ease-in-out infinite alternate; }
-  @keyframes kenburns { from { transform: scale(1.06) translate3d(0, 0, 0); } to { transform: scale(1.12) translate3d(-1%, -1%, 0); } }
-  /* moving video aerials (Apple-TV style): two layers crossfade between clips.
-     preferred over the photos; photos remain the fallback if video won't load. */
-  .vid { position: fixed; inset: 0; z-index: -2; width: 100%; height: 100%;
-         object-fit: cover; opacity: 0; transition: opacity 2.5s ease-in-out; }
-  .vid.show { opacity: .5; }
-  /* readability veil */
+  /* readability veil (non-overlay only) */
   body::after {
     content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none;
     background: linear-gradient(180deg, rgba(3,5,10,.55) 0%, rgba(3,5,10,.15) 35%, rgba(3,5,10,.55) 100%);
   }
 
-  .shell { height: 100%; display: flex; flex-direction: column; justify-content: space-between; padding: 6vh 7vw; }
+  .shell { height: 100%; display: flex; flex-direction: column; justify-content: space-between;
+           padding: 5vh 4vw; }
 
+  /* ---- top band ---- */
   .top { display: flex; justify-content: space-between; align-items: flex-start; }
-  .clock { display: inline-flex; align-items: center; font-size: 15vw; font-weight: 700;
-           line-height: .9; font-variant-numeric: tabular-nums; }
-  .clock .meta { display: inline-flex; flex-direction: column; margin-left: .18em; line-height: 1.08; }
-  .clock .sec  { font-size: 3.6vw; font-weight: 600; }
-  .clock .ampm { font-size: 3.6vw; font-weight: 600; }
-  .date { font-size: 2.6vw; font-weight: 600; margin-top: .4vh; }
+  .clock { display: inline-flex; align-items: baseline; font-size: 9vw; font-weight: 700;
+           line-height: .95; font-variant-numeric: tabular-nums; }
+  .clock .sec  { display: inline-block; min-width: 3ch; font-size: 3vw; font-weight: 700; }
+  .clock .ampm { font-size: 3vw; font-weight: 700; margin-left: .15em; }
+  .date { font-size: 2.2vw; font-weight: 600; margin-top: .6vh; opacity: .95; }
 
-  .weather-now { text-align: right; }
-  .wx-temp { font-size: 7vw; font-weight: 700; line-height: 1; }
-  .wx-cond { font-size: 2vw; margin-top: .4vh; }
-  .wx-icon { font-size: 6vw; line-height: 1; }
+  .forecast-head { display: flex; align-items: center; gap: .8vw; margin-bottom: 1vh; min-width: 0; }
+  .wx-icon { font-size: 2.4vw; line-height: 1; }
+  .wx-temp { font-size: 2.6vw; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; }
+  .wx-cond { font-size: 1.15vw; opacity: .9; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-  .bottom { display: flex; justify-content: space-between; align-items: flex-end; gap: 4vw; }
+  /* ---- bottom band: one flex row of tiles ---- */
+  .bottom { display: flex; gap: 1.2vw; align-items: stretch; }
+  .tile { display: flex; flex-direction: column; min-width: 0; overflow: hidden;
+          background: rgba(5,7,13,.55); border: 1px solid rgba(255,255,255,.14);
+          border-radius: 1.2vw; padding: 1.6vh 1.2vw; }
+  .tile.hidden { display: none; }
+  .forecast { flex: 2 1 0; }
+  .server, .media, .alarm, .nowplaying { flex: 1 1 0; }
+  .tile-label { font-size: 1vw; font-weight: 700; letter-spacing: .14em; text-transform: uppercase;
+                opacity: .65; margin-bottom: .9vh; white-space: nowrap; overflow: hidden;
+                text-overflow: ellipsis; }
 
-  .forecast { display: flex; gap: 1.7vw; }
-  .fc { text-align: center; }
-  .fc .d { font-size: 1.25vw; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
-  .fc .i { font-size: 2.6vw; margin: .3vh 0; }
-  .fc .t { font-size: 1.45vw; font-weight: 600; white-space: nowrap; }
-  .fc .t .lo { font-weight: 500; }
+  /* forecast: seven equal columns, sized to fit inside the tile */
+  .forecast-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: .3vw; flex: 1; }
+  .fc { display: flex; flex-direction: column; align-items: center; justify-content: center;
+        gap: .2vh; min-width: 0; }
+  .fc .d { font-size: .95vw; font-weight: 700; text-transform: uppercase; letter-spacing: .03em;
+           white-space: nowrap; }
+  .fc .i { font-size: 2.1vw; line-height: 1; }
+  .fc .t { font-size: 1vw; font-weight: 700; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .fc .t .lo { font-weight: 500; opacity: .8; }
 
-  .now-playing { max-width: 44vw; opacity: 0; transition: opacity .6s ease; }
-  .now-playing.show { opacity: 1; }
-  .np-label { font-size: 1.3vw; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; }
-  .np-title { font-size: 2.6vw; font-weight: 700; margin-top: .3vh; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .np-sub { font-size: 1.6vw; }
+  /* server: five labelled readouts in a row */
+  .server-row { display: flex; justify-content: space-between; align-items: center; gap: 1.2vw;
+                flex: 1; min-width: 0; }
+  .stat { display: flex; flex-direction: column; align-items: center; min-width: 0; }
+  .stat .v { font-size: 1.25vw; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .stat .k { font-size: .78vw; font-weight: 600; letter-spacing: .06em; text-transform: uppercase;
+             opacity: .6; white-space: nowrap; }
+  .server-note { font-size: 1.3vw; font-weight: 600; opacity: .9;
+                 overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-  /* bottom-left stack hierarchy: now-playing (loud) > alarm > homelab/room (quiet) */
-  .alarm-next { font-size: 1.5vw; font-weight: 600; margin-top: 1.2vh; }
-  .alarm-next .t { font-weight: 700; }
-  .homelab { font-size: 1.3vw; font-weight: 600; margin-top: 1vh; opacity: .9;
-             max-width: 54vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .homelab .sep { opacity: .55; margin: 0 .4em; }
-  .homelab .live-dot { display: inline-block; width: .55em; height: .55em; border-radius: 50%;
-                       background: #ff5252; margin-right: .3em; vertical-align: .05em;
-                       box-shadow: 0 0 8px rgba(255,82,82,.8); }
-  /* hostname label — shown verbatim (matches the machine's own capitalization) */
-  .room { font-size: 1.3vw; font-weight: 700; letter-spacing: .04em; opacity: .85; }
+  /* media: Plex poster + Plex line + livestream (title, progress) */
+  .media-body { display: flex; align-items: center; gap: .8vw; min-width: 0; flex: 1; }
+  .media-art { width: 3vw; height: 4.5vw; object-fit: cover; border-radius: .4vw; flex: none;
+               background: rgba(255,255,255,.06); }
+  .media-lines { min-width: 0; flex: 1; }
+  .media-lines > * + * { margin-top: .7vh; }
+  .media-line { font-size: 1.1vw; font-weight: 600; overflow: hidden; text-overflow: ellipsis;
+                white-space: nowrap; }
+  .media-line .muted { opacity: .6; font-weight: 500; }
+  .media-sub { font-size: .9vw; opacity: .75; font-variant-numeric: tabular-nums;
+               overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: .3vh; }
+  .media-bar { height: .35vh; min-height: 3px; border-radius: 2px; margin-top: .5vh;
+               background: rgba(255,255,255,.18); overflow: hidden; }
+  .media-bar > i { display: block; height: 100%; width: 0; background: #ff5252; }
+  .live-dot { display: inline-block; width: .5em; height: .5em; border-radius: 50%;
+              background: #ff5252; margin-right: .4em; vertical-align: .05em;
+              box-shadow: 0 0 8px rgba(255,82,82,.8); }
+
+  /* alarm + now-playing */
+  .alarm-time { font-size: 1.6vw; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .alarm-when { font-size: 1vw; font-weight: 600; opacity: .75; margin-top: .4vh;
+                overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .np-title { font-size: 1.4vw; font-weight: 700; overflow: hidden; text-overflow: ellipsis;
+              white-space: nowrap; }
+  .np-sub { font-size: 1vw; opacity: .8; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 </style>
 </head>
 <body>
   <div id="aurora"></div>
-  <div class="bg" id="bg-a"></div>
-  <div class="bg" id="bg-b"></div>
-  <video class="vid" id="vid-a" muted loop playsinline preload="none"></video>
-  <video class="vid" id="vid-b" muted loop playsinline preload="none"></video>
 
   <div class="shell">
-    <div class="top">
+    <header class="top">
       <div>
-        <div class="clock"><span id="time">–</span><span class="meta"><span class="sec" id="sec"></span><span class="ampm" id="ampm"></span></span></div>
+        <div class="clock"><span id="time">–</span><span class="sec" id="sec"></span><span class="ampm" id="ampm"></span></div>
         <div class="date" id="date"></div>
       </div>
-      <div class="weather-now">
-        <div class="wx-icon" id="wx-icon">·</div>
-        <div class="wx-temp" id="wx-temp">–</div>
-        <div class="wx-cond" id="wx-cond"></div>
-      </div>
-    </div>
+    </header>
 
-    <div class="bottom">
-      <div>
-        <div class="now-playing" id="np">
-          <div class="np-label">Now Playing</div>
-          <div class="np-title" id="np-title"></div>
-          <div class="np-sub" id="np-sub"></div>
+    <main class="mid"></main>
+
+    <footer class="bottom">
+      <section class="tile forecast" id="tile-forecast">
+        <div class="forecast-head">
+          <span class="wx-icon" id="wx-icon"></span>
+          <span class="wx-temp" id="wx-temp">–</span>
+          <span class="wx-cond" id="wx-cond"></span>
         </div>
-        <div class="alarm-next" id="alarm-next"></div>
-        <div class="homelab" id="homelab"></div>
-        <div class="room" id="room" style="margin-top:1vh"></div>
-      </div>
-      <div class="forecast" id="forecast"></div>
-    </div>
+        <div class="forecast-grid" id="forecast"></div>
+      </section>
+      <section class="tile server" id="tile-server">
+        <div class="tile-label" id="server-label">Server</div>
+        <div class="server-row" id="server-row"></div>
+      </section>
+      <section class="tile media hidden" id="tile-media">
+        <div class="tile-label">Media</div>
+        <div class="media-body">
+          <img class="media-art hidden" id="media-art" alt="">
+          <div class="media-lines">
+            <div class="media-line hidden" id="media-plex"></div>
+            <div class="media-live hidden" id="media-live">
+              <div class="media-line" id="media-live-title"></div>
+              <div class="media-sub hidden" id="media-live-sub"></div>
+              <div class="media-bar hidden" id="media-live-bar"><i></i></div>
+            </div>
+          </div>
+        </div>
+      </section>
+      <section class="tile alarm hidden" id="tile-alarm">
+        <div class="tile-label">Alarm</div>
+        <div class="alarm-time" id="alarm-time"></div>
+        <div class="alarm-when" id="alarm-when"></div>
+      </section>
+      <section class="tile nowplaying hidden" id="tile-np">
+        <div class="tile-label">Now Playing</div>
+        <div class="np-title" id="np-title"></div>
+        <div class="np-sub" id="np-sub"></div>
+      </section>
+    </footer>
   </div>
 
 <script>
-// ---- config (guest-safe: time, weather, now-playing only) ----
+// ---- config ----
 const params = new URLSearchParams(location.search);
+const OVERLAY = params.has('overlay');
+if (OVERLAY) document.body.classList.add('overlay');   // transparent page for mpv compositing
 const roomHost = params.get('host') || location.hostname || 'pi';
 let LAT = Number(params.get('lat')) || 39.7392;
 let LON = Number(params.get('lon')) || -104.9903;
-let CITY = params.get('city') || '';   // fallback; auto-detected below
+let CITY = params.get('city') || '';
 const WEATHER_CACHE_KEY = 'livingroom-dashboard-weather-v2';
-const GEO_CACHE_KEY = 'livingroom-dashboard-geo-v1';
-// Overlay mode reloads this page every minute (headless chromium render), so
-// external lookups must be cache-first: geolocation for a day, weather for
-// 10 minutes. Without this every render re-hits ip-api + open-meteo and the
-// render stalls on the network inside its virtual-time budget.
-const GEO_TTL = 24 * 60 * 60 * 1000;
-const WEATHER_FRESH = 10 * 60 * 1000;
+const HOMELAB_CACHE_KEY = 'livingroom-dashboard-homelab-v1';
+const WEATHER_FRESH = 10 * 60 * 1000;   // 10 min
+const HOMELAB_FRESH = 10 * 60 * 1000;   // 10 min
 // simplistic monochrome (white) line icons — no color emoji
 const ICONS = {
   sun:'<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.6v2.5M12 18.9v2.5M4.6 4.6l1.8 1.8M17.6 17.6l1.8 1.8M2.6 12h2.5M18.9 12h2.5M4.6 19.4l1.8-1.8M17.6 6.4l1.8-1.8"/></svg>',
@@ -188,12 +219,24 @@ const el = {
   wxTemp: document.getElementById('wx-temp'),
   wxCond: document.getElementById('wx-cond'),
   forecast: document.getElementById('forecast'),
-  np: document.getElementById('np'),
+  tileForecast: document.getElementById('tile-forecast'),
+  tileServer: document.getElementById('tile-server'),
+  serverLabel: document.getElementById('server-label'),
+  serverRow: document.getElementById('server-row'),
+  tileMedia: document.getElementById('tile-media'),
+  mediaArt: document.getElementById('media-art'),
+  mediaPlex: document.getElementById('media-plex'),
+  mediaLive: document.getElementById('media-live'),
+  mediaLiveTitle: document.getElementById('media-live-title'),
+  mediaLiveSub: document.getElementById('media-live-sub'),
+  mediaLiveBar: document.getElementById('media-live-bar'),
+  mediaLiveFill: document.querySelector('#media-live-bar i'),
+  tileAlarm: document.getElementById('tile-alarm'),
+  alarmTime: document.getElementById('alarm-time'),
+  alarmWhen: document.getElementById('alarm-when'),
+  tileNp: document.getElementById('tile-np'),
   npTitle: document.getElementById('np-title'),
   npSub: document.getElementById('np-sub'),
-  room: document.getElementById('room'),
-  alarmNext: document.getElementById('alarm-next'),
-  homelab: document.getElementById('homelab'),
 };
 
 function fetchJson(url, timeout = 7000) {
@@ -203,6 +246,7 @@ function fetchJson(url, timeout = 7000) {
     .then(r => r.ok ? r.json() : Promise.reject(new Error(r.statusText)))
     .finally(() => clearTimeout(timer));
 }
+const show = (node, on) => node.classList.toggle('hidden', !on);
 
 // ---- clock ----
 let lastMinute = '', lastDate = '';
@@ -215,36 +259,18 @@ function tick() {
     el.ampm.textContent = ap;
     lastMinute = minute;
   }
-  el.sec.textContent = ':' + String(d.getSeconds()).padStart(2, '0');
+  // In overlay mode the #sec slot stays empty — mpv's aerial-clock.lua draws the
+  // live seconds on top. Keep the element (fixed width) so AM/PM stays put.
+  if (!OVERLAY) el.sec.textContent = ':' + String(d.getSeconds()).padStart(2, '0');
   const date = d.toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric' });
   if (date !== lastDate) {
-    el.date.textContent = date;  // "Monday, July 6"
+    el.date.textContent = date;
     lastDate = date;
   }
 }
 tick(); setInterval(tick, 1000);
 
-// ---- location (auto via IP) + weather (full week) ----
-async function geolocate() {
-  if (params.has('lat') && params.has('lon')) return;
-  try {
-    const c = JSON.parse(localStorage.getItem(GEO_CACHE_KEY) || 'null');
-    if (c && c.lat && c.lon && Date.now() - c.savedAt < GEO_TTL) {
-      LAT = c.lat; LON = c.lon; CITY = c.city || CITY;
-      return;
-    }
-  } catch (e) {}
-  try {
-    const g = await fetchJson('http://ip-api.com/json/', 3000);
-    if (g && g.lat && g.lon) {
-      LAT = g.lat; LON = g.lon; CITY = g.city || CITY;
-      try {
-        localStorage.setItem(GEO_CACHE_KEY, JSON.stringify(
-          { savedAt: Date.now(), lat: LAT, lon: LON, city: CITY }));
-      } catch (e) {}
-    }
-  } catch (e) {}
-}
+// ---- weather (hub only: same-origin, server-cached, works with the internet down) ----
 function renderWeather(r, city) {
   if (!r || !r.current || !r.daily) return;
   const [ic, label] = wx(r.current.weather_code);
@@ -264,6 +290,7 @@ function renderWeather(r, city) {
     frag.appendChild(fc);
   }
   el.forecast.replaceChildren(frag);
+  show(el.tileForecast, true);
 }
 function cachedWeather() {
   try { return JSON.parse(localStorage.getItem(WEATHER_CACHE_KEY) || 'null'); }
@@ -278,9 +305,6 @@ function renderCachedWeather() {
 async function weather() {
   const cached = cachedWeather();
   if (cached && cached.data && Date.now() - cached.savedAt < WEATHER_FRESH) return;
-  // Preferred: the hub's /api/weather — same-origin, server-side cached, works
-  // with the internet down. The direct open-meteo path stays as a fallback for
-  // dashboards served by an older hub.
   try {
     const q = params.has('lat') && params.has('lon') ? `?lat=${LAT}&lon=${LON}` : '';
     const r = await fetchJson('/api/weather' + q, 7000);
@@ -288,18 +312,11 @@ async function weather() {
       if (r.city) CITY = r.city;
       renderWeather(r.data, CITY);
       localStorage.setItem(WEATHER_CACHE_KEY, JSON.stringify({ savedAt: Date.now(), city: CITY, data: r.data }));
-      return;
     }
-  } catch (e) {}
-  try {
-    await geolocate();
-    const u = `https://api.open-meteo.com/v1/forecast?latitude=${LAT}&longitude=${LON}` +
-      `&current=temperature_2m,weather_code&daily=weather_code,temperature_2m_max,temperature_2m_min` +
-      `&temperature_unit=fahrenheit&timezone=auto&forecast_days=7`;
-    const r = await fetchJson(u, 7000);
-    renderWeather(r, CITY);
-    localStorage.setItem(WEATHER_CACHE_KEY, JSON.stringify({ savedAt: Date.now(), city: CITY, data: r }));
-  } catch (e) {}
+  } catch (e) {
+    // No weather at all → hide the forecast tile (Part 4: never blank).
+    if (!cached || !cached.data) show(el.tileForecast, false);
+  }
 }
 renderCachedWeather();
 weather();
@@ -316,9 +333,7 @@ async function nowPlaying() {
       else {
         const p = decodeURIComponent(s.url).split('/').filter(Boolean);
         const file = p.pop() || ''; title = s.title || p.pop() || file.replace(/\.[^.]+$/, '');
-        if (!s.subtitle && s.source !== 'livestream') {
-          sub = 'On the Pi';
-        }
+        if (!s.subtitle && s.source !== 'livestream') sub = 'On the Pi';
       }
       const sig = title + '\n' + sub;
       if (sig !== lastNowPlaying) {
@@ -326,117 +341,14 @@ async function nowPlaying() {
         el.npSub.textContent = sub;
         lastNowPlaying = sig;
       }
-      el.np.classList.add('show');
+      show(el.tileNp, true);
     } else {
       lastNowPlaying = '';
-      el.np.classList.remove('show');
+      show(el.tileNp, false);
     }
   } catch (e) {}
 }
 nowPlaying(); setInterval(nowPlaying, 5000);
-
-// ---- ambient scenic background (rotating nature photos, graceful if offline) ----
-const SCENES = [
-  'https://images.unsplash.com/photo-1470071459604-3b5ec3a7fe05?auto=format&fit=crop&w=1920&q=76',  // misty forest
-  'https://images.unsplash.com/photo-1441974231531-c6227db76b6e?auto=format&fit=crop&w=1920&q=76',  // sunlit forest
-  'https://images.unsplash.com/photo-1506905925346-21bda4d32df4?auto=format&fit=crop&w=1920&q=76',  // mountains
-  'https://images.unsplash.com/photo-1472214103451-9374bd1c798e?auto=format&fit=crop&w=1920&q=76',  // rolling hills
-  'https://images.unsplash.com/photo-1500534623283-312aade485b7?auto=format&fit=crop&w=1920&q=76',  // lake
-  'https://images.unsplash.com/photo-1447752875215-b2761acb3c5d?auto=format&fit=crop&w=1920&q=76',  // forest path
-  'https://images.unsplash.com/photo-1418065460487-3e41a6c84dc5?auto=format&fit=crop&w=1920&q=76',  // green valley
-  'https://images.unsplash.com/photo-1454496522488-7a8e488e8606?auto=format&fit=crop&w=1920&q=76',  // alpine lake
-  'https://images.unsplash.com/photo-1424746219973-8fe3bd07d8e3?auto=format&fit=crop&w=1920&q=76',  // forest sunbeams
-  'https://images.unsplash.com/photo-1439853949127-fa647821eba0?auto=format&fit=crop&w=1920&q=76',  // coastal cliffs
-  'https://images.unsplash.com/photo-1426604966848-d7adac402bff?auto=format&fit=crop&w=1920&q=76',  // valley river
-  'https://images.unsplash.com/photo-1470770841072-f978cf4d019e?auto=format&fit=crop&w=1920&q=76',  // mountain lake
-  'https://images.unsplash.com/photo-1433086966358-54859d0ed716?auto=format&fit=crop&w=1920&q=76',  // waterfall
-  'https://images.unsplash.com/photo-1465056836041-7f43ac27dcb5?auto=format&fit=crop&w=1920&q=76',  // snowy peaks
-  'https://images.unsplash.com/photo-1444525873963-75d329ef9e1b?auto=format&fit=crop&w=1920&q=76',  // desert dunes
-  'https://images.unsplash.com/photo-1501854140801-50d01698950b?auto=format&fit=crop&w=1920&q=76',  // green hills
-];
-let si = 0, bgActive = -1, photosRunning = false;
-const bgLayers = [document.getElementById('bg-a'), document.getElementById('bg-b')];
-function nextScene() {
-  const url = SCENES[si % SCENES.length]; si++;
-  const img = new Image();
-  img.decoding = 'async';
-  img.onload = () => {                       // crossfade: fade the new layer in, old out
-    const next = bgActive === 0 ? 1 : 0;
-    bgLayers[next].style.backgroundImage = `url("${url}")`;
-    bgLayers[next].classList.add('show');
-    if (bgActive >= 0) bgLayers[bgActive].classList.remove('show');
-    bgActive = next;
-  };
-  img.src = url;                             // if it fails, the aurora gradient stays
-}
-function startPhotos() {                      // fallback if the aerials won't load
-  if (photosRunning) return;
-  photosRunning = true;
-  nextScene(); setInterval(nextScene, 90 * 1000);
-}
-
-// ---- moving video aerials (Apple-TV style): the actual Apple tvOS aerials that
-//      AerialViews uses, 1080p H.264 (url-1080-H264 from Apple's entries.json) so
-//      chromium can software-decode them (no GL for chromium; HEVC won't play).
-//      Two layers crossfade between clips; photos remain the fallback on error.
-// Served locally by the hub (screen/fetch-aerials.sh caches + faststart-remuxes
-// Apple's aerials into ./data/hub/aerials -> /aerials). Local + faststart so they
-// start instantly and work fully offline; the app filters to what's on disk.
-const AERIALS = [
-  '/aerials/01-hawaii.mp4',
-  '/aerials/02-new-york.mp4',
-  '/aerials/03-dubai.mp4',
-  '/aerials/04-hong-kong.mp4',
-  '/aerials/05-london.mp4',
-  '/aerials/06-greenland.mp4',
-  '/aerials/07-new-zealand.mp4',
-  '/aerials/08-aurora.mp4',
-  '/aerials/09-china.mp4',
-  '/aerials/10-san-francisco.mp4',
-  '/aerials/11-caribbean.mp4',
-  '/aerials/12-new-york-night.mp4',
-];
-let vi = 0, vidActive = -1, aerialsOk = false;
-const vidLayers = [document.getElementById('vid-a'), document.getElementById('vid-b')];
-function nextAerial() {
-  const url = AERIALS[vi % AERIALS.length]; vi++;
-  const next = vidActive === 0 ? 1 : 0;
-  const v = vidLayers[next];
-  v.oncanplay = () => {
-    aerialsOk = true;
-    v.play().catch(() => {});
-    v.classList.add('show');
-    if (vidActive >= 0) {
-      const prev = vidLayers[vidActive];
-      prev.classList.remove('show');
-      setTimeout(() => { try { prev.pause(); } catch (e) {} }, 2600);
-    }
-    vidActive = next;
-  };
-  v.onerror = () => { if (!aerialsOk) startPhotos(); };  // network/codec issue → photos
-  v.preload = 'auto';
-  v.src = url;
-  v.load();
-}
-// Default to the crossfading stills. The moving aerials are cached locally and
-// faststart-remuxed (so they load), but this cage/chromium kiosk runs with
-// --disable-gpu and DECODES the video without ever PAINTING it — the <video>
-// stays black. Real moving aerials need mpv (Pi-5 hardware decode) behind a
-// transparent chromium overlay (labwc), not <video> in cage. Opt in with
-// ?bg=video only to demo/verify; photos are the working default.
-if (params.has('overlay')) {
-  // transparent widgets only; mpv draws the aerial underneath. No page bg.
-  document.body.classList.add('overlay');
-} else if (params.get('bg') === 'video') {
-  nextAerial();
-  setInterval(nextAerial, 45 * 1000);
-  setTimeout(() => { if (!aerialsOk) startPhotos(); }, 8000);
-} else {
-  startPhotos();
-}
-
-// ---- room label = hostname (?host= from kiosk, else browser hostname) ----
-el.room.textContent = roomHost;
 
 // ---- next alarm (same-origin hub) ----
 async function nextAlarm() {
@@ -456,63 +368,149 @@ async function nextAlarm() {
         }
       }
     });
-    if (!best) { el.alarmNext.textContent = ''; return; }
+    if (!best) { show(el.tileAlarm, false); return; }
     const t = best.cand;
     let h = t.getHours(); const ap = h >= 12 ? 'PM' : 'AM'; h = h % 12 || 12;
     const tm = h + ':' + String(t.getMinutes()).padStart(2, '0') + ' ' + ap;
     const midnight = d => new Date(d.getFullYear(), d.getMonth(), d.getDate());
     const dd = Math.round((midnight(t) - midnight(now)) / 86400000);
-    const when = dd === 0 ? '' : dd === 1 ? ' tomorrow'
-      : ' ' + t.toLocaleDateString('en-US', { weekday: 'long' });
-    // show the media SOURCE (what will play), not the freeform label
+    const when = dd === 0 ? 'Today' : dd === 1 ? 'Tomorrow'
+      : t.toLocaleDateString('en-US', { weekday: 'long' });
     const SRC = { appletv_music: 'Apple Music', livestream: 'Livestream',
       shuffle: 'Shuffle movies/TV', file: 'Server file', airplay: 'AirPlay' };
     const src = best.a.source || (best.a.method === 'airplay' ? 'airplay' : 'appletv_music');
-    el.alarmNext.innerHTML = iconHTML('alarm') + ' <span class="t">' + tm + '</span>'
-      + (when + ' · ' + (SRC[src] || 'Apple Music'));
-  } catch (e) { el.alarmNext.textContent = ''; }
+    el.alarmTime.textContent = tm;
+    el.alarmWhen.textContent = when + ' · ' + (SRC[src] || 'Apple Music');
+    show(el.tileAlarm, true);
+  } catch (e) { show(el.tileAlarm, false); }
 }
 nextAlarm(); setInterval(nextAlarm, 60 * 1000);
 
-// ---- homelab status (same-origin hub; hub caches the probes) ----
-function sep() { const s = document.createElement('span'); s.className = 'sep'; s.textContent = '·'; return s; }
-async function homelabStatus() {
-  try {
-    const h = await fetchJson('/api/homelab', 4000);
-    const box = el.homelab;
-    box.replaceChildren();
-    const icon = document.createElement('span');
-    icon.innerHTML = iconHTML('server') + ' ';
-    box.appendChild(icon);
-    if (!h.up) { box.appendChild(document.createTextNode((h.host || 'homelab') + ' offline')); return; }
+// ---- homelab status (same-origin hub; cache-first so a slow SSH probe never
+//      stalls the overlay capture) ----
+const DASH = '–';
+function fmtClock(s) {
+  s = Math.max(0, Math.floor(s));
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+  return (h ? h + ':' + String(m).padStart(2, '0') : String(m)) + ':' + String(sec).padStart(2, '0');
+}
+function stat(v, k) {
+  const d = document.createElement('div'); d.className = 'stat';
+  d.innerHTML = '<div class="v">' + (v == null || v === '' ? DASH : v) + '</div>'
+              + '<div class="k">' + k + '</div>';
+  return d;
+}
+function renderHomelab(h) {
+  // server tile
+  const row = el.serverRow;
+  row.replaceChildren();
+  el.serverLabel.textContent = 'Server';
+  if (!h || !h.up) {
+    const note = document.createElement('div');
+    note.className = 'server-note';
+    note.textContent = ((h && h.host) || roomHost) + ' offline';
+    row.appendChild(note);
+    show(el.tileServer, true);
+  } else {
     const name = (h.plex && h.plex.name) || h.host || 'homelab';
-    box.appendChild(document.createTextNode(name));
-    if (h.latency_ms != null) {
-      box.appendChild(sep());
-      box.appendChild(document.createTextNode(Math.round(h.latency_ms) + 'ms'));
-    }
     if (h.stats && h.stats.ok) {
       const s = h.stats;
-      for (const txt of ['cpu ' + s.cpu_pct + '%', 'ram ' + s.mem_pct + '%',
-                         s.disk_used_tb + '/' + s.disk_total_tb + 'T', s.temp_c + '°']) {
-        box.appendChild(sep());
-        box.appendChild(document.createTextNode(txt));
-      }
+      row.append(
+        stat(h.latency_ms != null ? Math.round(h.latency_ms) + 'ms' : DASH, 'ping'),
+        stat(s.cpu_pct != null ? s.cpu_pct + '%' : DASH, 'cpu'),
+        stat(s.mem_pct != null ? s.mem_pct + '%' : DASH, 'ram'),
+        stat(s.disk_pct != null ? s.disk_pct + '%' : DASH, 'disk'),
+        stat(s.temp_c != null ? s.temp_c + '°' : DASH, 'temp'),
+      );
+    } else {
+      const note = document.createElement('div');
+      note.className = 'server-note';
+      note.textContent = name + (h.latency_ms != null ? ' · ' + Math.round(h.latency_ms) + 'ms' : '');
+      row.appendChild(note);
     }
-    if (h.plex && h.plex.ok) {
-      box.appendChild(sep());
-      const n = h.plex.sessions || 0;
-      let plexTxt = n === 0 ? 'Plex idle' : 'Plex ' + n + (n === 1 ? ' stream' : ' streams');
-      if (h.plex.transcodes) plexTxt += ' (' + h.plex.transcodes + ' transcode)';
-      box.appendChild(document.createTextNode(plexTxt));
+    show(el.tileServer, true);
+  }
+
+  // media tile: Plex poster + line, livestream title/progress; hidden if none
+  let any = false;
+  const plex = h && h.plex && h.plex.ok ? h.plex : null;
+  const live = h && h.live && h.live.ok && h.live.title ? h.live : null;
+
+  // poster: the active Plex session's, else the live title's Plex poster
+  const poster = (plex && plex.poster) || (live && live.poster) || null;
+  if (poster) {
+    const src = '/api/plex/artwork?key=' + encodeURIComponent(poster);
+    if (el.mediaArt.getAttribute('src') !== src) el.mediaArt.setAttribute('src', src);
+    show(el.mediaArt, true);
+  } else {
+    show(el.mediaArt, false);
+  }
+
+  if (plex) {
+    const n = plex.sessions || 0;
+    let txt = n === 0 ? 'Plex idle' : 'Plex ' + n + (n === 1 ? ' stream' : ' streams');
+    if (plex.transcodes) txt += ' (' + plex.transcodes + ' transcode)';
+    const titles = (plex.titles || []).filter(Boolean).slice(0, 3);
+    el.mediaPlex.replaceChildren(document.createTextNode(txt));
+    if (titles.length) {
+      const s = document.createElement('span'); s.className = 'muted';
+      s.textContent = ' · ' + titles.join(', ');
+      el.mediaPlex.appendChild(s);
     }
-    if (h.live && h.live.ok && h.live.playing && h.live.title) {
-      box.appendChild(sep());
+    show(el.mediaPlex, true);
+    any = true;
+  } else {
+    show(el.mediaPlex, false);
+  }
+
+  // livestream: title + position/duration. The hub serves the last good value
+  // (stale) when the title API blips, so this persists instead of vanishing.
+  if (live) {
+    el.mediaLiveTitle.replaceChildren();
+    if (live.playing) {
       const dot = document.createElement('span'); dot.className = 'live-dot';
-      box.appendChild(dot);
-      box.appendChild(document.createTextNode(h.live.title));
+      el.mediaLiveTitle.appendChild(dot);
     }
-  } catch (e) { el.homelab.replaceChildren(); }
+    el.mediaLiveTitle.appendChild(document.createTextNode(live.title));
+    const pos = live.position, dur = live.duration;
+    if (pos != null && dur) {
+      el.mediaLiveSub.textContent = fmtClock(pos) + ' / ' + fmtClock(dur)
+        + (live.stale ? ' · reconnecting' : '');
+      el.mediaLiveFill.style.width = Math.min(100, 100 * pos / dur) + '%';
+      show(el.mediaLiveSub, true);
+      show(el.mediaLiveBar, true);
+    } else {
+      el.mediaLiveSub.textContent = live.stale ? 'reconnecting…' : '';
+      show(el.mediaLiveSub, !!live.stale);
+      show(el.mediaLiveBar, false);
+    }
+    show(el.mediaLive, true);
+    any = true;
+  } else {
+    show(el.mediaLive, false);
+  }
+  show(el.tileMedia, any);
+}
+function cachedHomelab() {
+  try { return JSON.parse(localStorage.getItem(HOMELAB_CACHE_KEY) || 'null'); }
+  catch (e) { return null; }
+}
+async function homelabStatus() {
+  const cached = cachedHomelab();
+  const fresh = cached && cached.data && Date.now() - cached.savedAt < HOMELAB_FRESH;
+  if (fresh) renderHomelab(cached.data);   // paint instantly, update in place below
+  try {
+    const h = await fetchJson('/api/homelab', 4000);
+    renderHomelab(h);
+    localStorage.setItem(HOMELAB_CACHE_KEY, JSON.stringify({ savedAt: Date.now(), data: h }));
+  } catch (e) {
+    if (!cached || !cached.data) {           // endpoint failed and no cache → hide
+      show(el.tileServer, false);
+      show(el.tileMedia, false);
+    } else if (!fresh) {
+      renderHomelab(cached.data);            // stale cache beats blank
+    }
+  }
 }
 homelabStatus(); setInterval(homelabStatus, 60 * 1000);
 </script>

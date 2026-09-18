@@ -84,9 +84,39 @@ senders on the same adapter can wedge the bus.
 the content, exposes `/status`, `/play`, `/control`, `/stop`, and handles TV
 input reclaim. The supervisor relaunches mpv when playback wedges.
 
+**Media library** — `file`/`shuffle` playback and the media browser read a
+read-only CIFS/SMB share mounted on the host at `/mnt/share` (`SCREEN_MEDIA_ROOT`
+defaults to `/mnt/share/media`). It's host-side only: the hub proxies
+`/api/media/*` to the screen player and never sees the mount. The browser
+decorates rows with Plex posters (proxied via `/api/media/poster`) and, when a
+show's episodes are flat in its folder (`…SxxExx…`), presents them as one
+`Season N` folder per season (tap to open, episodes in order) — client-side, from
+the filenames. A
+Continue-watching entry can be dismissed (`POST /api/media/resume/forget`), which
+deletes its mpv watch-later file on the host.
+
 **`aerial-mode`** (host) — the ambient dashboard. mpv hardware-decodes cached
 Apple aerials on DRM while a headless Chromium renders `/dashboard?overlay=1` to
 a PNG that's pushed over mpv's `overlay-add` once a minute.
+
+**Dashboard / overlay pipeline** — `hub/app/static/dashboard.html` is the on-TV
+info board: a top band (clock + date) and a bottom band of glass tiles (forecast
+with current conditions, server, media, alarm, now-playing). In `?overlay=1` mode the page is
+transparent and mpv composites it over a hardware-decoded aerial; the page keeps
+an empty, fixed-width `#sec` slot and `aerial-clock.lua` draws the live seconds
+there (`AERIAL_SEC_X/Y/FS`, measured from the 3840x2160 render). `aerial-mode.py`
+captures the PNG as soon as `#time` has text and `#wx-temp` is not `–`, so those
+two ids and the `–` sentinel are a contract. Weather and homelab are cache-first
+in `localStorage` (10 min) so a slow probe never stalls the capture; the hub's
+`HOMELAB_TTL` is 120s. The media tile shows the active Plex session's poster
+(`/api/plex/artwork`, proxied so the token stays server-side), falling back to
+the livestream title looked up in Plex by name, plus the livestream title with
+position/duration and a progress bar; the hub keeps the last good livestream
+state (`_live_cache`) and serves it stale when the title API blips, so the line
+persists instead of vanishing. The server tile reads ping / CPU / RAM / disk% /
+temp; CPU is the real load figure (may exceed 100% on an over-subscribed box). Non-overlay mode is a static aurora
+gradient — the Unsplash rotation, `<video>` aerials and Ken Burns animation were
+removed.
 
 ## Key decisions
 
@@ -109,6 +139,16 @@ a PNG that's pushed over mpv's `overlay-add` once a minute.
 - **One long-lived Chromium over CDP** for overlay renders (~0.8s warm) instead
   of cold-starting per minute (8–15s), with re-attach on session loss and a
   cold one-shot as the last resort.
+- **Media library on a host CIFS mount, not in the container.** Only the host
+  screen player (root, DRM master) opens the files, so the share is mounted once
+  on the host and the hub just proxies `/api/media/*`. Keeps SMB credentials out
+  of the container image. The fstab entry is an `x-systemd.automount`, so it
+  mounts on first access and `nofail` keeps a missing share from blocking boot.
+- **Live seconds live in mpv, not the page.** The overlay PNG is rendered once a
+  minute, so the page reserves a fixed-width empty `#sec` slot and
+  `aerial-clock.lua` draws the ticking seconds as an ASS OSD on top — effectively
+  free, and it survives the once-a-minute reload. The lua's `AERIAL_SEC_X/Y/FS`
+  defaults are measured from the 4K render so the two line up.
 - **Rejoin budget that refills.** The livestream's ffmpeg restarts at each title
   change, and mpv carries a stale init segment across the discontinuity. A fixed
   budget of 3 rejoins ran out mid-evening and left a permanently corrupt picture,

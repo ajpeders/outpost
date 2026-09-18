@@ -56,10 +56,13 @@ On Trixie the `chromium-browser` package installs the binary as `chromium`;
 - **Plex** — browse libraries, playlists, and search; play tracks/playlists.
 - **Pi-side screen player** — mpv-based local playback (livestream / file / shuffle)
   with volume/mute from the phone, resume-where-you-left-off, and a supervisor that
-  self-heals a wedged livestream.
-- **Ambient TV dashboard** — when nothing's playing the TV shows a clock/weather/
-  now-playing/system kiosk over Apple's tvOS aerial clips (`aerial-screen`), or a
-  plain browser kiosk (`kiosk-screen`).
+  self-heals a wedged livestream. The library browser shows Plex posters,
+  presents flat TV episodes as one folder per season, and lets you dismiss a
+  Continue-watching entry.
+- **Ambient TV dashboard** — when nothing's playing the TV shows an info board over
+  Apple's tvOS aerial clips (`aerial-screen`): clock, weather + 7-day forecast,
+  server stats, media (Plex poster + livestream progress), next alarm, and
+  now-playing tiles. Or a plain browser kiosk (`kiosk-screen`).
 - **Sleep timer + auto-off** — 30/60/90-min timer, plus a nightly sweep that stands
   the TV down if it was left on the idle dashboard.
 - **Health panel** — `/api/health` surfaces per-service status, disk, CPU temp,
@@ -86,7 +89,9 @@ docker compose up -d --build
 Everything past `ATV_ADDRESS` is optional and env-driven (see `.env.example`):
 `PLEX_URL`/`PLEX_TOKEN` enable the Plex browser, `JETSTREAM_*` the livestream
 card, `HOMELAB_SSH` the server-stats line on the dashboard. Leave any of them
-blank to turn that feature off. `TZ` sets the wall-clock zone alarms fire in.
+blank to turn that feature off. `TZ` sets the wall-clock zone alarms fire in;
+keep the Pi's host timezone in sync with it (`sudo timedatectl set-timezone …`),
+because the on-TV dashboard clock is rendered by Chromium on the host.
 
 Check it came up with `curl -s localhost:8080/api/health`, or run the bundled
 smoke-tester, which exercises the appletv + cec endpoints and prints each
@@ -114,9 +119,21 @@ set `SCREEN_MEDIA_ROOT` in the unit itself (`systemctl edit screen-player`, then
 `Environment=SCREEN_MEDIA_ROOT=/path/to/media`). The same applies to the other
 `SCREEN_*` / `AERIAL_*` knobs documented at the top of each script.
 
+The `file`/`shuffle` sources and the media browser read a read-only SMB/CIFS
+share mounted on the host at `/mnt/share` (library root `/mnt/share/media`).
+Setup — `cifs-utils`, the credentials file, and the fstab automount entry — is in
+[HOWTO.md](HOWTO.md#mount-the-media-library-smbcifs).
+
+The dashboard itself is `hub/app/static/dashboard.html`: a top band (clock + date)
+and a bottom band of glass tiles (forecast, server, media, alarm, now-playing). The
+live seconds are drawn by mpv (`screen/aerial-clock.lua`, `AERIAL_SEC_X/Y/FS`)
+over the once-a-minute overlay render — tune those if the seconds sit off the clock
+slot.
+
 `aerial-screen` needs clips fetched once via `screen/fetch-aerials.sh` — it pulls
 12 by default; `AERIAL_MAX=0` grabs Apple's whole catalogue, which is tens of GB
-at 4K, onto your SD card. `RES=1080` downscales.
+at 4K, onto your SD card. `RES=1080` downscales. The cache is gitignored
+(`data/hub/aerials/`), so re-run it after a rebuild or a fresh clone.
 
 `kiosk-screen` additionally wants `sudo screen/install-cursor.sh` once, or a
 stuck mouse pointer sits in the middle of the TV.

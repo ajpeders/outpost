@@ -478,6 +478,37 @@ def _resume_list() -> dict:
     return {"entries": entries[:10]}
 
 
+def forget_resume(rel: str) -> bool:
+    """Drop the saved resume point for a library file (the Continue-watching
+    "Cancel" action). Removes every watch-later entry whose '#' comment names
+    this file; returns whether anything was removed."""
+    real_target = osp.realpath(_safe_media_path(rel))
+    try:
+        names = os.listdir(WATCH_LATER_DIR)
+    except OSError:
+        return False
+    removed = False
+    for n in names:
+        wl = osp.join(WATCH_LATER_DIR, n)
+        try:
+            with open(wl) as fh:
+                txt = fh.read(4096)
+        except OSError:
+            continue
+        path = None
+        for line in txt.splitlines():
+            if line.startswith("#"):
+                path = line.lstrip("# ").strip()
+                break
+        if path and osp.realpath(path) == real_target:
+            try:
+                os.remove(wl)
+                removed = True
+            except OSError:
+                pass
+    return removed
+
+
 def _ipc(cmd: list) -> dict | None:
     """Send one mpv IPC command and return its reply, or None if the socket
     isn't there (only *media* playback opens it — live HLS doesn't). Skips any
@@ -764,6 +795,13 @@ class Handler(BaseHTTPRequestHandler):
             except (ValueError, OSError) as exc:
                 return self._send(400, {"error": str(exc)})
             self._send(200, {"playing": target})
+        elif self.path == "/media/resume/forget":
+            rel = str(body.get("path", "")).strip()
+            try:
+                ok = forget_resume(rel)
+            except (ValueError, OSError) as exc:
+                return self._send(400, {"error": str(exc)})
+            self._send(200, {"ok": ok})
         elif self.path == "/shuffle":
             rel = str(body.get("path", "")).strip()
             try:

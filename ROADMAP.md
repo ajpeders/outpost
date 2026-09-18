@@ -1,5 +1,33 @@
 # livingroom-pi roadmap
 
+## Agent-sized TODO queue — 2026-09-18
+
+These cards break selected existing priorities and observed gaps into small tasks.
+They are the execution queue; the broader roadmap below remains product context.
+Pick one card per change. Paths and commands are relative to this project root;
+`(new)` marks a file to create. Read applicable `AGENTS.md` first. Check whether the
+work has already landed before editing. If so, cite the implementation and checks
+instead of rebuilding it. Install dependencies using this project's documented setup.
+
+`ready` means no product decision is needed, not that every tool is installed.
+Honor explicit dependencies and blocked/parked labels. Do not expand a card into an
+architecture rewrite. If a contract or prerequisite is missing, record the blocker.
+Mark a card complete only with its acceptance evidence; report changed files, checks
+run, and remaining limitations. These TODOs do not authorize deployment, publishing,
+live messages, or changes to production data.
+
+- [ ] **HOME-01 — Return a failing exit status from the smoke client on API failures** (ready)
+  - **Why:** test-client.py displays errors, but its request helpers discard success/failure outcomes.
+  - **Start here:** test-client.py, HOWTO.md, tests/test_client.py (new).
+  - **Do:** Track failures across the selected command’s HTTP requests and return nonzero for connection failures or non-2xx responses. Preserve readable output and the default read-only sweep. Add stdlib unittest cases using mocked urllib responses.
+  - **Done when:** Run python3 -m unittest discover -s tests -p test_client.py. All-success exits 0; HTTP/connection failures exit nonzero, including one failure in a multi-request sweep. Tests never contact the Pi or issue hardware commands.
+
+- [ ] **HOME-02 — Finish the already-built Plex-on-Apple-TV acceptance check** (blocked: Apple TV + Plex player advertising)
+  - **Why:** Current priorities identify the on-device Advertise as Player toggle as the missing prerequisite.
+  - **Start here:** HOWTO.md, ROADMAP.md, hub/app/plex.py, hub/app/main.py.
+  - **Do:** After the owner enables player advertising, verify the client is visible and run one chosen library item through the existing ATV button. Record resolved media/version, successful playback, and stop behavior. Distinguish route failure from client discovery failure.
+  - **Done when:** A dated manual result confirms the intended file/version plays on Apple TV. If advertising is absent, retain blocked status. Do not revive the skipped Plex-alarm or dropped presence-automation work.
+
 Self-contained living-room controller on a Raspberry Pi 5. **Off the homelab** —
 survives homelab reboots. Apple TV stays the streaming brain; the Pi controls
 the TV set (CEC), hosts the hub app, and runs scheduled automations.
@@ -200,6 +228,62 @@ the TV set (CEC), hosts the hub app, and runs scheduled automations.
   The journal is now persistent (`/var/log/journal`) so a recurrence leaves
   evidence; PSU is clean (`throttled=0x0`). Pi is wifi-only — ethernet or a DHCP
   reservation for .220 would make it bulletproof.
+
+## SMB media library mount (2026-09-18) ✅ *(set up on the Pi)*
+
+The library browser and the `file`/`shuffle` sources were returning `400` on
+`/api/media/list` because the SMB share wasn't mounted (no `cifs-utils`, no
+fstab entry). The read-only CIFS mount is now set up on the host:
+
+- `apt-get install cifs-utils`; credentials in `/etc/smarthome-smb.credentials`
+  (root-only, `username=ween`).
+- `/etc/fstab`: `//192.168.0.176/share /mnt/share cifs …,ro,_netdev,nofail,
+  x-systemd.automount,x-systemd.mount-timeout=15s` (pre-change fstab backed up
+  to `/etc/fstab.before-smarthome-library`).
+- `systemctl start mnt-share.automount`; first access mounts it. Verified
+  `findmnt`, `/api/media/list` (root + nested), `/api/media/resume`, and an SMB
+  file read all return 200.
+- Host-only: the hub proxies `/api/media/*` and never sees the mount. Library
+  root is `SCREEN_MEDIA_ROOT` (default `/mnt/share/media`).
+- Docs: HOWTO "Mount the media library (SMB/CIFS)", README dashboard section,
+  ARCHITECTURE responsibilities/decisions.
+- **Covers + seasons (2026-09-18):** the browser now shows Plex posters
+  (`/api/media/poster`, token stays server-side) and presents flat TV episodes as
+  one `Season N` folder per season (tap to open, episodes ordered by number,
+  client-side regex). Continue-watching rows gained a ✕ that clears the saved
+  resume point (`/api/media/resume/forget` → screen player deletes the
+  watch-later file).
+
+## TV dashboard rework (2026-09-18) ✅ *(built + deployed)*
+
+An audit found the rebuilt Pi's dashboard degraded and the layout broken at TV
+sizes. Implemented per
+`docs/superpowers/specs/2026-09-18-tv-dashboard-rework-design.md`:
+
+- **Baseline:** host timezone set to `America/Denver` to match the hub `TZ` (the
+  host-rendered clock was 7 h ahead); aerials fetched; `screen-player` drop-in
+  `SCREEN_KIOSK_SERVICE=aerial-screen`; `aerial-screen` enabled.
+- **Layout:** `dashboard.html` rebuilt as an info board — top band (clock ~9vw +
+  date) and a bottom band of glass tiles (forecast `flex: 2`, carrying the current
+  conditions above the 7-day grid; server / media / alarm / now-playing
+  `flex: 1`). The 7-day forecast is a `repeat(7,1fr)` grid inside its tile, so it
+  no longer runs off the right edge. Verified no overflow at 1920x1080 and
+  3840x2160; top and bottom bands share the same margins.
+- **Seconds:** the page reserves an empty fixed-width `#sec` slot (zero height);
+  `aerial-clock.lua` draws the live seconds (now DejaVu Sans bold, `\an5`) centred
+  on the AM/PM line at `AERIAL_SEC_X/Y/FS` = 1133 / 351 / 115 at 4K.
+- **Data:** weather is hub-only (the direct open-meteo / ip-api fallback is gone);
+  homelab and weather are cache-first in `localStorage`; `HOMELAB_TTL` 20s → 120s.
+  Tiles hide per explicit rules (never blank).
+- **Media tile (2026-09-18):** shows the active Plex stream's poster
+  (`/api/plex/artwork`), falling back to the livestream title looked up in Plex
+  by name; plus the livestream title with position/duration + a progress bar. The
+  hub caches the last-good livestream state and serves it stale on a title-API
+  blip so it persists.
+- **Server tile (2026-09-18):** label is `Server`; CPU shows the real load
+  (uncapped, can exceed 100%), disk is a percentage instead of used/total.
+- **Simplification:** the Unsplash photo rotation, `<video>` aerial path and Ken
+  Burns animation are removed; non-overlay is a static aurora gradient.
 
 ## Play on Apple TV via Plex (2026-07-31) 🟡 *(built + deployed, blocked on one toggle)*
 

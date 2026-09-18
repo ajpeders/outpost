@@ -18,6 +18,7 @@ import shutil
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
+from urllib.parse import quote
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request
@@ -623,7 +624,48 @@ async def jetstream_skip():
 @app.get("/api/media/list")
 async def media_list(path: str = ""):
     r = await client.get(f"{SCREEN_URL}/media/list", params={"path": path})
-    return Response(content=r.content, status_code=r.status_code, media_type="application/json")
+    if r.status_code != 200 or not (plexmod.PLEX_URL and plexmod.PLEX_TOKEN):
+        return Response(content=r.content, status_code=r.status_code,
+                        media_type="application/json")
+    # Decorate each entry with a same-origin poster URL when Plex knows the item.
+    # Best-effort: if Plex is unreachable the plain listing still loads.
+    try:
+        data = r.json()
+        await _ensure_plex_index()
+        for entry in data.get("entries") or []:
+            key = _plex_poster_key(entry.get("path", ""))
+            if key:
+                entry["poster"] = ("/api/media/poster?path="
+                                   + quote(entry["path"], safe="")
+                                   + "&v=" + quote(key, safe=""))
+        return JSONResponse(content=data)
+    except (httpx.HTTPError, ValueError):
+        return Response(content=r.content, status_code=200,
+                        media_type="application/json")
+
+
+@app.get("/api/media/poster")
+async def media_poster(path: str, v: str = ""):
+    """Stream a library entry's Plex poster. The browser stays same-origin and
+    the Plex token never leaves the hub. `v` is an opaque cache-buster."""
+    if not (plexmod.PLEX_URL and plexmod.PLEX_TOKEN):
+        raise HTTPException(status_code=404, detail="Plex not configured")
+    try:
+        await _ensure_plex_index()
+    except (httpx.HTTPError, ValueError) as exc:
+        raise HTTPException(status_code=502, detail=f"Plex unreachable: {exc}") from exc
+    key = _plex_poster_key(path)
+    if not key:
+        raise HTTPException(status_code=404, detail="no poster for this item")
+    try:
+        r = await client.get(f"{plexmod.PLEX_URL}{key}",
+                             params={"X-Plex-Token": plexmod.PLEX_TOKEN})
+        r.raise_for_status()
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"poster fetch failed: {exc}") from exc
+    return Response(content=r.content,
+                    media_type=r.headers.get("content-type", "image/jpeg"),
+                    headers={"Cache-Control": "public, max-age=86400"})
 
 
 @app.post("/api/media/play")
@@ -662,6 +704,17 @@ async def media_resume():
     """Continue-watching list (mpv watch-later entries from the screen player)."""
     try:
         r = await client.get(f"{SCREEN_URL}/media/resume")
+    except httpx.RequestError as exc:
+        return JSONResponse(status_code=502, content={"error": f"screen player unreachable: {exc}"})
+    return Response(content=r.content, status_code=r.status_code, media_type="application/json")
+
+
+@app.post("/api/media/resume/forget")
+async def media_resume_forget(body: dict):
+    """Dismiss a Continue-watching entry (clear its saved resume point)."""
+    try:
+        r = await client.post(f"{SCREEN_URL}/media/resume/forget",
+                              json={"path": body.get("path", "")})
     except httpx.RequestError as exc:
         return JSONResponse(status_code=502, content={"error": f"screen player unreachable: {exc}"})
     return Response(content=r.content, status_code=r.status_code, media_type="application/json")
@@ -847,7 +900,9 @@ async def health():
 
 # --- homelab (Plex server box) status + Plex client-control playback ----
 _homelab_cache: dict = {"at": 0.0, "data": None}
-HOMELAB_TTL = 20
+HOMELAB_TTL = 120
+# last good jetstream title/position, served stale if the title API blips
+_live_cache: dict = {"at": 0.0, "data": None}
 # System stats over SSH (key + known_hosts mounted read-only at /ssh).
 # Unset HOMELAB_SSH to disable the probe entirely.
 HOMELAB_SSH = os.environ.get("HOMELAB_SSH", "")
@@ -906,6 +961,26 @@ async def _plex_json(path: str, **params) -> dict:
     return r.json().get("MediaContainer", {})
 
 
+@app.get("/api/plex/artwork")
+async def plex_artwork(key: str):
+    """Proxy a Plex image (poster/art) so the dashboard stays same-origin and
+    the token stays server-side. `key` is a /library/... image path from a
+    session's thumb/grandparentThumb."""
+    if not (plexmod.PLEX_URL and plexmod.PLEX_TOKEN):
+        raise HTTPException(status_code=404, detail="Plex not configured")
+    if not key.startswith("/library/") or ".." in key:
+        raise HTTPException(status_code=400, detail="bad artwork key")
+    try:
+        r = await client.get(f"{plexmod.PLEX_URL}{key}",
+                             params={"X-Plex-Token": plexmod.PLEX_TOKEN})
+        r.raise_for_status()
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"artwork fetch failed: {exc}") from exc
+    return Response(content=r.content,
+                    media_type=r.headers.get("content-type", "image/jpeg"),
+                    headers={"Cache-Control": "public, max-age=3600"})
+
+
 @app.get("/api/homelab")
 async def homelab():
     """One-glance homelab status: host latency, Plex server + active streams,
@@ -929,6 +1004,9 @@ async def homelab():
         try:
             root = await _plex_json("/")
             streams = (await _plex_json("/status/sessions")).get("Metadata") or []
+            poster = next((s.get("grandparentThumb") or s.get("thumb") or s.get("art")
+                           for s in streams
+                           if s.get("grandparentThumb") or s.get("thumb") or s.get("art")), None)
             return {
                 "ok": True,
                 "name": root.get("friendlyName"),
@@ -936,6 +1014,7 @@ async def homelab():
                 "sessions": len(streams),
                 "transcodes": sum(1 for m in streams if m.get("TranscodeSession")),
                 "titles": [m.get("grandparentTitle") or m.get("title") for m in streams][:3],
+                "poster": poster,
             }
         except Exception as exc:  # noqa: BLE001 - status must never throw
             return {"ok": False, "error": str(exc)[:120]}
@@ -946,11 +1025,21 @@ async def homelab():
         try:
             r = await client.get(JETSTREAM_TITLE_URL, headers=_jetstream_headers(), timeout=5.0)
             d = r.json()
-            return {"ok": True, "playing": bool(d.get("playing")),
+            data = {"ok": True, "playing": bool(d.get("playing")),
                     "title": _clean_text(d.get("title")),
                     "position": d.get("position_seconds"),
                     "duration": d.get("duration_seconds")}
+            if data["title"]:
+                try:
+                    await _ensure_plex_index()
+                    data["poster"] = _plex_poster_for_title(data["title"])
+                except (httpx.HTTPError, ValueError):
+                    data["poster"] = None
+            _live_cache.update(at=time.time(), data=data)
+            return data
         except (httpx.RequestError, ValueError):
+            if _live_cache["data"]:
+                return {**_live_cache["data"], "stale": True}
             return {"ok": False}
 
     latency, plex, live, stats = await asyncio.gather(
@@ -961,41 +1050,96 @@ async def homelab():
     return data
 
 
+def _norm_title(s: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", (s or "").lower()).strip()
+
+
+async def _ensure_plex_index():
+    """Build (or refresh) the share-path -> Plex item index used by the ATV
+    handoff and the library posters. One metadata GET per video section, cached
+    10 min. Raises httpx errors if Plex is unreachable."""
+    now = time.time()
+    if now - _plex_path_cache["at"] <= 600 and _plex_path_cache["by_path"]:
+        return
+    by_path: dict = {}
+    by_base: dict = {}
+    by_dir: dict = {}
+    by_show: dict = {}
+    by_title: dict = {}
+    for section, item_type in _PLEX_VIDEO_SECTIONS.values():
+        mc = await _plex_json(f"/library/sections/{section}/all", type=item_type)
+        for m in mc.get("Metadata") or []:
+            # episodes carry the show poster on grandparentThumb; movies their own
+            poster = (m.get("grandparentThumb") if item_type == 4 else None) or m.get("thumb")
+            entry = {
+                "ratingKey": m.get("ratingKey"),
+                "title": m.get("title"),
+                "grandparentTitle": m.get("grandparentTitle"),
+                "year": m.get("year"),
+                "resolution": next((med.get("videoResolution")
+                                    for med in m.get("Media") or []), None),
+                "poster": poster,
+            }
+            if item_type == 4 and m.get("grandparentTitle") and poster:
+                by_show[m["grandparentTitle"]] = entry
+            if item_type == 1:                       # movies: title -> poster
+                by_title[_norm_title(m.get("title"))] = entry
+                if m.get("year"):
+                    by_title[_norm_title(f"{m.get('title')} {m.get('year')}")] = entry
+            for med in m.get("Media") or []:
+                for p in med.get("Part") or []:
+                    f = p.get("file") or ""
+                    if f:
+                        by_path[f] = entry
+                        by_base[os.path.basename(f)] = entry
+                        # movies only: "Title (Year)" folder name — lets an
+                        # unindexed copy (e.g. _4k_archive) find the library's
+                        # version of the same movie
+                        if item_type == 1:
+                            by_dir[os.path.basename(os.path.dirname(f))] = entry
+    _plex_path_cache.update(at=now, by_path=by_path, by_base=by_base,
+                            by_dir=by_dir, by_show=by_show, by_title=by_title)
+
+
+def _plex_poster_for_title(title: str) -> str | None:
+    """Poster for a free-text title (e.g. a jetstream live title). Tries an exact
+    normalized match, then strips a trailing year ("28 Years Later 2025")."""
+    norm = _norm_title(title)
+    if not norm:
+        return None
+    entry = _plex_path_cache.get("by_title", {}).get(norm)
+    if entry is None:
+        m = re.match(r"^(.*?)\s+(19|20)\d{2}$", norm)
+        if m:
+            entry = _plex_path_cache.get("by_title", {}).get(m.group(1).strip())
+    return (entry or {}).get("poster")
+
+
 async def _plex_video_lookup(rel_path: str):
     """Map a share-relative library path (movies/…, tv/…) to its Plex item by
     exact Part-file match; basename match is the fallback for copies that live
     outside the indexed trees (e.g. _4k_archive). Returns metadata dict or None."""
-    now = time.time()
-    if now - _plex_path_cache["at"] > 600 or not _plex_path_cache["by_path"]:
-        by_path: dict = {}
-        by_base: dict = {}
-        by_dir: dict = {}
-        for section, item_type in _PLEX_VIDEO_SECTIONS.values():
-            mc = await _plex_json(f"/library/sections/{section}/all", type=item_type)
-            for m in mc.get("Metadata") or []:
-                entry = {
-                    "ratingKey": m.get("ratingKey"),
-                    "title": m.get("title"),
-                    "grandparentTitle": m.get("grandparentTitle"),
-                    "year": m.get("year"),
-                    "resolution": next((med.get("videoResolution")
-                                        for med in m.get("Media") or []), None),
-                }
-                for med in m.get("Media") or []:
-                    for p in med.get("Part") or []:
-                        f = p.get("file") or ""
-                        if f:
-                            by_path[f] = entry
-                            by_base[os.path.basename(f)] = entry
-                            # movies only: "Title (Year)" folder name — lets an
-                            # unindexed copy (e.g. _4k_archive) find the library's
-                            # version of the same movie
-                            if item_type == 1:
-                                by_dir[os.path.basename(os.path.dirname(f))] = entry
-        _plex_path_cache.update(at=now, by_path=by_path, by_base=by_base, by_dir=by_dir)
+    await _ensure_plex_index()
     return (_plex_path_cache["by_path"].get(f"/data/{rel_path}")
             or _plex_path_cache["by_base"].get(os.path.basename(rel_path))
             or _plex_path_cache.get("by_dir", {}).get(os.path.basename(os.path.dirname(rel_path))))
+
+
+def _plex_poster_key(rel_path: str) -> str | None:
+    """Plex image key for a library entry's poster, or None. Handles both the
+    folder rows (movie folder / show folder) and the files inside them."""
+    parts = rel_path.strip("/").split("/")
+    if len(parts) < 2:
+        return None
+    if parts[0] == "movies":
+        entry = _plex_path_cache.get("by_dir", {}).get(parts[1])
+        if entry is None and len(parts) > 2:
+            entry = (_plex_path_cache.get("by_path", {}).get(f"/data/{rel_path}")
+                     or _plex_path_cache.get("by_base", {}).get(parts[-1]))
+        return (entry or {}).get("poster")
+    if parts[0] == "tv":
+        return (_plex_path_cache.get("by_show", {}).get(parts[1]) or {}).get("poster")
+    return None
 
 
 @app.post("/api/plex/play_on_atv")
