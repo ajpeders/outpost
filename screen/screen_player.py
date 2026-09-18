@@ -890,5 +890,9 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
+    # Nothing is playing on a fresh start, so bring the idle dashboard up. The
+    # unit doesn't do this itself, and without it a bare restart (e.g. after an
+    # edit) leaves the TV blank until the next playback ends.
+    _kiosk("start")
     threading.Thread(target=_supervisor, daemon=True).start()
     ThreadingHTTPServer(("127.0.0.1", PORT), Handler).serve_forever()

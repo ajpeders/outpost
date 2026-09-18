@@ -19,7 +19,9 @@ Consequences worth remembering:
   knobs (`SCREEN_*`, `AERIAL_*`) are set with `systemctl edit <unit>`.
 - Only one host unit can hold the display at a time. `aerial-screen` and
   `kiosk-screen` are mutually exclusive, and the screen player stops the kiosk
-  before mpv takes over (`SCREEN_KIOSK_SERVICE` names which one to stop).
+  before mpv takes over and starts it again on exit (`SCREEN_KIOSK_SERVICE` names
+  which one). It also starts the kiosk on its own startup, so a bare restart
+  doesn't leave the TV blank.
 - mpv's IPC socket is root-owned. Querying it as a normal user silently
   returns `None` for every property rather than erroring.
 
