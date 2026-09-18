@@ -41,9 +41,11 @@ Done on the Pi before any UI work, while `curl localhost:9595/status` reports
    units, so there is no window where a play request stops the wrong one. `screen_player.py`
    defaults `SCREEN_KIOSK_SERVICE` to `kiosk-screen` and the unit does not
    override it, so mpv would restart the wrong unit after playback. Add a
-   drop-in on the Pi with `sudo systemctl edit screen-player` containing
+   drop-in on the Pi at
+   `/etc/systemd/system/screen-player.service.d/override.conf` containing
    `[Service]` / `Environment=SCREEN_KIOSK_SERVICE=aerial-screen`, then
-   `sudo systemctl restart screen-player` (safe: nothing is playing). The
+   `sudo systemctl daemon-reload && sudo systemctl restart screen-player`
+   (safe: nothing is playing). The
    repo default stays `kiosk-screen` so other installs are unaffected; HOWTO
    documents the drop-in.
 4. `sudo systemctl disable --now kiosk-screen && sudo systemctl enable --now aerial-screen`.
@@ -111,7 +113,8 @@ exists and refreshes each minute, the TV clock matches `docker exec hub date`,
 - **Media:** Plex line (`Plex idle` / `Plex N streams`, then up to three
   titles) and livestream line (red dot + title). Rules:
   - Plex line shown when `plex.ok`; hidden when `plex.ok` is false.
-  - Live line shown when `live.ok && live.playing && live.title`.
+  - Live line shown when `live && live.ok && live.playing && live.title`
+    (`live` is null when `JETSTREAM_TITLE_URL` is unset).
   - Tile hidden when neither line would show.
   - Both lines ellipsize inside the tile.
 - **Alarm:** next alarm time, relative day, source. Hidden when none; a
@@ -149,8 +152,8 @@ than three characters of text and **`#wx-temp`** is not one of `''`, `–`,
 layout uses `–` as the universal empty state, which is compatible because
 `_painted` only inspects `#wx-temp`.
 
-Consequence: if weather is unavailable and there is no cache, `_painted`
-times out after 3 s and the renderer sleeps `SETTLE` (2 s) before capturing.
+Consequence: if `/api/weather` fails and there is no localStorage cache,
+`_painted` times out after 3 s and the renderer sleeps `SETTLE` (2 s) before capturing.
 The Part 5 warm-render budget therefore only applies when weather is
 available.
 
@@ -177,7 +180,11 @@ available.
   serves every other overlay fetch from cache and halves SSH probes. The
   localStorage copy, not the hub TTL, is what protects the capture. Hub
   restart is safe during playback.
-- Weather and geolocation caching are unchanged.
+- Weather caching is unchanged. The direct `api.open-meteo.com` and
+  `ip-api.com` fallback in `weather()` is **removed**: the hub is the only
+  thing that serves this page, `/api/weather` already serves stale data on
+  upstream failure, and the fallback made the page's behaviour depend on
+  the Pi's internet access. `GEO_CACHE_KEY` and `geolocate()` go with it.
 
 ## Part 4 — error handling
 
@@ -202,9 +209,11 @@ available.
    server, media and alarm tiles are `display: none` and the forecast tile
    spans the full band width.
 3. Fresh browser context. `/api/weather` routed to HTTP 502: assert the
-   forecast tile is hidden and the other tiles span the band.
+   forecast tile is hidden, `#wx-temp` reads `–`, no request left the hub
+   origin, and the other tiles span the band.
 4. Measure the `#sec` box in the 4K render and confirm the committed
-   `AERIAL_SEC_*` defaults match it.
+   `AERIAL_SEC_X/Y` defaults are within 2 px of its centre-x and top-y and
+   `AERIAL_SEC_FS` within 2 px of its computed font size.
 5. On the Pi: from the `aerial-screen` journal, one cold and one warm
    overlay render; warm must stay under 3 s with weather available.
 6. Pull `/tmp/aerial-ov.png` from the Pi and inspect it, then confirm the
