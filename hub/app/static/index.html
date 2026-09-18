@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Living Room</title>
 <link rel="icon" href="/static/icon-192.png">
 <link rel="manifest" href="/static/manifest.json">
@@ -32,7 +32,7 @@
     --ink: #071018;
     --shadow: 0 20px 55px rgba(0, 0, 0, .35);
     --soft-shadow: 0 8px 22px rgba(0, 0, 0, .22);
-    --radius: 8px;
+    --radius: 12px;
   }
 
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -59,7 +59,7 @@
     outline-offset: 2px;
   }
 
-  .shell { width: min(1160px, 100%); margin: 0 auto; padding: 18px 14px 34px; }
+  .shell { width: min(1160px, 100%); margin: 0 auto; padding: 18px max(16px, env(safe-area-inset-right)) max(34px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left)); }
 
   .topbar {
     display: grid; grid-template-columns: minmax(0, 1fr) auto;
@@ -117,8 +117,8 @@
   .transport button:hover { background: var(--surface-3); border-color: var(--line-strong); }
   .transport button:active { transform: translateY(1px); }
   .transport .pp { background: var(--fg); color: var(--ink); }
-  .transport2 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 8px; }
-  .transport2 button { min-height: 46px; border-radius: var(--radius); background: var(--surface-2); font-size: 14px; font-weight: 750; }
+  .transport2 { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+  .transport2 button { flex: 1 1 100px; min-width: 0; min-height: 46px; border-radius: var(--radius); background: var(--surface-2); font-size: 14px; font-weight: 750; }
   .transport2 .stop { background: rgba(102, 33, 34, .78); color: #ffe2df; }
 
   /* mpv's own volume — the TV's CEC volume is a separate, coarser control */
@@ -130,8 +130,10 @@
   .np-volume .vol-val { font-size: 13px; font-weight: 750; opacity: .75; text-align: right;
                         font-variant-numeric: tabular-nums; }
 
-  .layout { display: grid; grid-template-columns: minmax(330px, 1fr) minmax(360px, .88fr); gap: 14px; align-items: start; margin-top: 14px; }
-  .stack { display: grid; gap: 14px; min-width: 0; }
+  .layout { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 14px; align-items: start; margin-top: 14px; }
+  .panel { min-width: 0; }
+  .remote-panel { grid-column: 2; grid-row: 1 / span 2; }
+  .watch-panel, .tv-panel { grid-column: 1; }
 
   .panel {
     border: 1px solid var(--line); border-radius: var(--radius);
@@ -179,9 +181,10 @@
   /* --- Media lists --- */
   .music-results { display: grid; gap: 6px; max-height: 340px; overflow-y: auto; }
   .music-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 10px 11px; border: 1px solid var(--line); border-radius: var(--radius); background: rgba(255, 255, 255, .035); }
+  .music-row > div { min-width: 0; }
   .music-row .m-title { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .music-row .m-sub { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .music-row button { min-height: 34px; padding: 5px 13px; border-radius: var(--radius); background: var(--accent); color: #fff; font-size: 12px; font-weight: 750; }
+  .music-row button { min-height: 44px; padding: 5px 13px; border-radius: var(--radius); background: var(--accent); color: #fff; font-size: 12px; font-weight: 750; }
   .music-row.has-atv { grid-template-columns: minmax(0, 1fr) auto auto; }
   .music-stop { width: 100%; min-height: 44px; border-radius: var(--radius); margin-top: 10px; }
 
@@ -199,8 +202,9 @@
   .add-alarm { width: 100%; min-height: 48px; border-radius: var(--radius); background: transparent; font-weight: 750; border: 1px dashed var(--line-strong); }
   .alarm-form { display: grid; gap: 11px; padding: 13px; border: 1px dashed var(--line-strong); border-radius: var(--radius); background: rgba(0, 0, 0, .12); }
   .alarm-form label { display: grid; gap: 5px; font-size: 12px; font-weight: 750; letter-spacing: .06em; text-transform: uppercase; color: var(--dim); }
-  .alarm-form input, .alarm-form select { min-height: 46px; border: 1px solid var(--line); border-radius: var(--radius); background: rgba(7, 10, 13, .78); color: var(--fg); padding: 0 11px; font-size: 15px; }
-  .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .alarm-form label { min-width: 0; }
+  .alarm-form input, .alarm-form select { min-width: 0; width: 100%; min-height: 46px; border: 1px solid var(--line); border-radius: var(--radius); background: rgba(7, 10, 13, .78); color: var(--fg); padding: 0 11px; font-size: 16px; }
+  .field-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
   .days { display: flex; gap: 5px; }
   .days button { flex: 1; min-height: 40px; border-radius: var(--radius); background: var(--surface-3); font-size: 12px; font-weight: 800; }
 
@@ -227,42 +231,41 @@
   }
   #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 
-  @media (min-width: 900px) {
-    .layout > .stack:first-child {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-    .layout > .stack:first-child > .panel:first-child,
-    .layout > .stack:first-child > .panel:nth-child(4),
-    .layout > .stack:first-child > .panel:nth-child(5) {
-      grid-column: 1 / -1;
-    }
-  }
+  button[aria-busy="true"] { opacity: .6; cursor: progress; }
+  .tv-grid { grid-template-columns: repeat(auto-fit, minmax(64px, 1fr)); }
+  .panel-note { overflow-wrap: anywhere; }
+  .status-pill { max-width: 100%; white-space: normal; }
+  .dot { flex-shrink: 0; }
+  #toast { bottom: max(16px, env(safe-area-inset-bottom)); overflow-wrap: anywhere; }
+
   @media (max-width: 760px) {
-    .shell { padding-inline: 12px; padding-bottom: 22px; }
-    .topbar { grid-template-columns: 1fr; gap: 10px; }
-    h1 { font-size: 26px; }
-    .status-pill { justify-self: start; }
-    .layout { grid-template-columns: 1fr; }
+    .shell { padding-top: 10px; }
+    .topbar { gap: 10px; }
+    h1 { font-size: 26px; overflow-wrap: anywhere; }
+    .status-pill { font-size: 12px; padding: 8px; }
+    .layout { grid-template-columns: minmax(0, 1fr); }
+    .layout > .panel { grid-column: auto; grid-row: auto; }
     .hero { padding: 18px; min-height: 146px; }
-    .np-art { width: 76px; height: 76px; }
-    .hero.has-art .now-title, .hero.has-art .now-sub { padding-right: 92px; }
-    .now-title { font-size: 25px; }
-    .panel-head { align-items: flex-start; flex-direction: column; gap: 3px; }
+    .np-art { width: 64px; height: 64px; }
+    .hero.has-art .now-title, .hero.has-art .now-sub { padding-right: 80px; }
+    .now-title { font-size: 26px; }
+    .panel-head { flex-wrap: wrap; gap: 6px; }
     .panel-note { text-align: left; }
-    .tv-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    .transport { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .transport { grid-template-columns: repeat(4, minmax(0, 1fr)); }
     .transport .pp { grid-column: 1 / -1; grid-row: 1; }
-    .transport2 { grid-template-columns: 1fr; }
+    .transport button { font-size: 13px; }
   }
   @media (max-width: 460px) {
-    /* narrow phones: give the alarm label room; actions drop to their own row */
     .alarm { grid-template-columns: auto minmax(0, 1fr); }
-    .alarm-actions { grid-column: 1 / -1; justify-content: flex-end; }
+    .alarm-actions { grid-column: 1 / -1; flex-wrap: wrap; }
+    .alarm-actions button { flex: 1; min-height: 44px; }
+    .field-row { grid-template-columns: minmax(0, 1fr); }
+    .panel-body { padding: 12px; }
+    .days { gap: 3px; }
+    .days button { min-width: 0; padding-inline: 0; min-height: 44px; }
   }
-  @media (max-width: 390px) {
-    .control-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    .field-row { grid-template-columns: 1fr; }
-    .tv-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { transition: none !important; }
   }
 </style>
 </head>
@@ -339,10 +342,8 @@
     </div>
   </section>
 
-  <div class="layout hidden" id="controls">
-    <div class="stack">
-      <!-- WATCH: the Pi's HDMI is the main screen now -->
-      <section class="panel">
+  <div class="layout" id="controls">
+    <section class="panel watch-panel">
         <div class="panel-head">
           <h2 class="panel-title">Watch on the TV</h2>
           <div class="panel-note">Pi HDMI · HDR10</div>
@@ -363,8 +364,38 @@
         </div>
       </section>
 
-      <!-- TV power + input, with the active source highlighted -->
-      <section class="panel">
+    <section class="panel remote-panel">
+        <div class="panel-head">
+          <h2 class="panel-title">Apple TV Remote</h2>
+          <div class="panel-note">Apple TV apps</div>
+        </div>
+        <div class="panel-body remote">
+          <div class="dpad" aria-label="Apple TV directional controls">
+            <span></span>
+            <button data-atv="up" aria-label="Up">▲</button>
+            <span></span>
+            <button data-atv="left" aria-label="Left">◀</button>
+            <button class="select" data-atv="select">OK</button>
+            <button data-atv="right" aria-label="Right">▶</button>
+            <span></span>
+            <button data-atv="down" aria-label="Down">▼</button>
+            <span></span>
+          </div>
+
+          <div class="control-grid">
+            <button data-atv="menu">Menu</button>
+            <button data-atv="home">Home</button>
+            <button data-atv="play_pause">Play/Pause</button>
+            <button data-atv="skip_backward">Back 10</button>
+            <button data-atv="skip_forward">Forward 10</button>
+            <button data-atv="top_menu">Top Menu</button>
+            <button data-atv="volume_down">Vol -</button>
+            <button data-atv="volume_up">Vol +</button>
+          </div>
+        </div>
+      </section>
+
+    <section class="panel tv-panel">
         <div class="panel-head">
           <h2 class="panel-title">TV &amp; Input</h2>
           <div class="panel-note" id="tv-status">Checking CEC</div>
@@ -386,8 +417,7 @@
         </div>
       </section>
 
-      <!-- Sleep timer: stop playback + everything off after a delay -->
-      <section class="panel">
+    <section class="panel sleep-panel">
         <div class="panel-head">
           <h2 class="panel-title">Sleep Timer</h2>
           <div class="panel-note" id="sleep-note">Off</div>
@@ -402,7 +432,19 @@
         </div>
       </section>
 
-      <section class="panel">
+    <section class="panel scenes-panel">
+        <div class="panel-head">
+          <h2 class="panel-title">Scenes</h2>
+          <div class="panel-note">Ready</div>
+        </div>
+        <div class="panel-body">
+          <div class="tv-grid" id="scenes-list" style="grid-template-columns:1fr;gap:8px">
+            <span class="muted">Loading…</span>
+          </div>
+        </div>
+      </section>
+
+    <section class="panel alarms-panel">
         <div class="panel-head">
           <h2 class="panel-title">Alarms</h2>
           <div class="panel-note">Wake-ups</div>
@@ -457,23 +499,7 @@
         </div>
       </section>
 
-    <section class="panel">
-        <div class="panel-head">
-          <h2 class="panel-title">Scenes</h2>
-          <div class="panel-note">Ready</div>
-        </div>
-        <div class="panel-body">
-          <div class="tv-grid" id="scenes-list" style="grid-template-columns:1fr;gap:8px">
-            <span class="muted">Loading…</span>
-          </div>
-        </div>
-      </section>
-
-    </div>
-
-    <div class="stack">
-      <!-- System health: which link in the chain is broken, at a glance -->
-      <section class="panel">
+    <section class="panel health-panel">
         <div class="panel-head">
           <h2 class="panel-title">System</h2>
           <div class="panel-note" id="health-note">…</div>
@@ -484,42 +510,10 @@
           </div>
         </div>
       </section>
-
-      <section class="panel">
-        <div class="panel-head">
-          <h2 class="panel-title">Apple TV Remote</h2>
-          <div class="panel-note">Apple TV apps</div>
-        </div>
-        <div class="panel-body remote">
-          <div class="dpad" aria-label="Apple TV directional controls">
-            <span></span>
-            <button data-atv="up" aria-label="Up">▲</button>
-            <span></span>
-            <button data-atv="left" aria-label="Left">◀</button>
-            <button class="select" data-atv="select">OK</button>
-            <button data-atv="right" aria-label="Right">▶</button>
-            <span></span>
-            <button data-atv="down" aria-label="Down">▼</button>
-            <span></span>
-          </div>
-
-          <div class="control-grid">
-            <button data-atv="menu">Menu</button>
-            <button data-atv="home">Home</button>
-            <button data-atv="play_pause">Play/Pause</button>
-            <button data-atv="skip_backward">Back 10</button>
-            <button data-atv="skip_forward">Forward 10</button>
-            <button data-atv="top_menu">Top Menu</button>
-            <button data-atv="volume_down">Vol -</button>
-            <button data-atv="volume_up">Vol +</button>
-          </div>
-        </div>
-      </section>
-    </div>
   </div>
 </main>
 
-<div id="toast"></div>
+<div id="toast" role="status" aria-live="polite"></div>
 
 <script>
 const $ = selector => document.querySelector(selector);
@@ -531,10 +525,23 @@ async function api(method, path, body) {
     options.headers = {'content-type': 'application/json'};
     options.body = JSON.stringify(body);
   }
-  const response = await fetch(path, options);
-  let data = null;
-  try { data = await response.json(); } catch {}
-  return { ok: response.ok, status: response.status, data };
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), method === 'GET' ? 8000 : 30000);
+  options.signal = controller.signal;
+  try {
+    const response = await fetch(path, options);
+    let data = null;
+    try { data = await response.json(); } catch {}
+    return { ok: response.ok, status: response.status, data };
+  } catch (error) {
+    const message = error.name === 'AbortError'
+      ? 'Request timed out. Check the device before trying again.'
+      : 'Connection lost. Check your connection and try again.';
+    if (method !== 'GET') toast(message);
+    return { ok: false, status: 0, data: { error: message } };
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 let toastTimer;
@@ -555,13 +562,7 @@ function setStatus(kind, text) {
 function setBusy(button, busy) {
   if (!button) return;
   button.disabled = busy;
-  if (busy) {
-    button.dataset.label = button.textContent;
-    button.textContent = 'Working...';
-  } else if (button.dataset.label) {
-    button.textContent = button.dataset.label;
-    delete button.dataset.label;
-  }
+  button.setAttribute('aria-busy', String(busy));
 }
 
 function esc(s) {
@@ -588,7 +589,8 @@ $$('[data-cec]').forEach(button => button.addEventListener('click', () => sendCe
 
 document.addEventListener('keydown', event => {
   const active = document.activeElement;
-  if (active && (active.tagName === 'INPUT' || active.tagName === 'SELECT')) return;
+  if (event.repeat || event.altKey || event.ctrlKey || event.metaKey) return;
+  if (active?.matches('input, select, textarea, button, [contenteditable]')) return;
   const map = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right', Enter: 'select', Escape: 'menu', ' ': 'play_pause' };
   const command = map[event.key];
   if (!command || $('#controls').classList.contains('hidden')) return;
@@ -1043,8 +1045,6 @@ $('#np-skip').addEventListener('click', async () => {
 });
 // Initial fetch — first refresh() awaits this (see bottom of file) so the button's
 // show/hide state is correct on first paint without a separate timing dependency.
-loadJetstreamCaps();
-
 /* --- scenes (one-tap combos from data/hub/scenes.json) --- */
 let scenesCache = {};
 async function loadScenes() {
@@ -1099,7 +1099,7 @@ function mediaRow(label, kind, onClick, onAtv) {
   const b = document.createElement('button');
   b.textContent = kind === 'file' ? 'Play' : (kind === 'back' ? 'Up' : 'Open');
   if (kind !== 'file') b.style.background = 'var(--surface-3)';
-  b.onclick = onClick;
+  b.onclick = event => { event.stopPropagation(); onClick(event); };
   row.appendChild(b);
   if (kind !== 'file') { row.style.cursor = 'pointer'; row.onclick = onClick; }
   return row;
@@ -1149,43 +1149,31 @@ async function refreshTvState() {
   $('#tv-status').textContent = 'TV ' + power + ', ' + adapter;
 }
 
+let refreshing = false;
 async function refresh() {
-  const status = await api('GET', '/api/atv/status');
-  if (!status.ok) {
-    $('#np-eyebrow').textContent = 'Now Playing';
-    $('#np-title').textContent = 'Apple TV service unavailable';
-    $('#np-sub').textContent = status.data?.error || '';
-    setStatus('bad', 'Service offline');
-    $('#pair').classList.add('hidden');
-    $('#controls').classList.add('hidden');
-    return;
-  }
+  if (refreshing) return;
+  refreshing = true;
+  try { await refreshState(); } finally { refreshing = false; }
+}
+async function refreshState() {
+  // Independent services load together; Apple TV setup must not block Pi controls.
+  const [status, activeInput, screen] = await Promise.all([
+    api('GET', '/api/atv/status'), refreshInput(), api('GET', '/api/screen/status'),
+  ]);
   const info = status.data || {};
-  $('#dev').textContent = info.name || 'Living Room';
-
-  if (!info.paired) {
-    $('#pair').classList.remove('hidden');
-    $('#controls').classList.add('hidden');
-    $('#np-title').textContent = info.reachable ? 'Apple TV needs pairing' : 'Apple TV is asleep or unreachable';
-    $('#np-sub').textContent = '';
-    setArtwork('');
-    setStatus(info.reachable ? '' : 'bad', info.reachable ? 'Setup needed' : 'Unreachable');
-    return;
-  }
-
-  $('#pair').classList.add('hidden');
-  $('#controls').classList.remove('hidden');
-  setStatus(info.connected ? 'ok' : '', info.connected ? 'Connected' : 'Reachable');
-
+  $('#dev').textContent = info.name || 'Controller';
+  $('#pair').classList.toggle('hidden', !status.ok || !!info.paired);
+  $$('.remote-panel button, #w-appletv, #w-music').forEach(button => {
+    if (button.getAttribute('aria-busy') !== 'true') button.disabled = !status.ok || !info.paired;
+  });
+  if (!status.ok) setStatus('bad', 'Apple TV offline');
+  else if (!info.paired) setStatus('', 'Apple TV setup needed');
+  else setStatus(info.connected ? 'ok' : '', info.connected ? 'Connected' : 'Reconnecting');
   loadAlarms();
-  const activeInput = await refreshInput();
 
-  // Now playing: video plays on the Pi's HDMI, so show THAT first.
-  const screen = await api('GET', '/api/screen/status');
   const sd = screen.ok ? (screen.data || {}) : {};
   const screenPlaying = !!(sd.playing && sd.url);
-  if (window._wasScreenPlaying && !screenPlaying) api('POST', '/api/screen/stop');
-  window._wasScreenPlaying = screenPlaying;
+  // Status polling is read-only; a transient failure must never stop playback.
 
   if (screenPlaying) {
     setArtwork('');
@@ -1270,7 +1258,8 @@ async function refresh() {
 
 // Load jetstream capabilities before the first refresh so the Skip button's
 // show/hide state is right on first paint (showTransport reads jetstreamCaps).
-(async () => { await loadJetstreamCaps(); refresh(); refreshTvState(); refreshSleep(); refreshHealth(); })();
+loadJetstreamCaps().then(refresh);
+refresh(); refreshTvState(); refreshSleep(); refreshHealth();
 // Poll only while the app is visible — a backgrounded phone tab shouldn't keep
 // the hub, the Apple TV, and CEC busy (or spam the hub's access log).
 setInterval(() => { if (!document.hidden) refresh(); }, 4000);
