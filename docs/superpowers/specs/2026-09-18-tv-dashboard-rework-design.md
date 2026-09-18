@@ -115,7 +115,8 @@ exists and refreshes each minute, the TV clock matches `docker exec hub date`,
   - Plex line shown when `plex.ok`; hidden when `plex.ok` is false.
   - Live line shown when `live && live.ok && live.playing && live.title`
     (`live` is null when `JETSTREAM_TITLE_URL` is unset).
-  - Tile hidden when neither line would show.
+  - Tile hidden when neither line would show, or when the endpoint failed
+    and there is no localStorage copy.
   - Both lines ellipsize inside the tile.
 - **Alarm:** next alarm time, relative day, source. Hidden when none; a
   failed `/api/alarms` fetch counts as none, matching today's `catch`.
@@ -185,6 +186,7 @@ available.
   thing that serves this page, `/api/weather` already serves stale data on
   upstream failure, and the fallback made the page's behaviour depend on
   the Pi's internet access. `GEO_CACHE_KEY` and `geolocate()` go with it.
+  The `?lat`/`?lon` URL passthrough to `/api/weather` is kept.
 
 ## Part 4 — error handling
 
