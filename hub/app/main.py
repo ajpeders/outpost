@@ -1082,7 +1082,10 @@ async def homelab():
             data = {"ok": True, "playing": bool(d.get("playing")),
                     "title": _clean_text(d.get("title")),
                     "position": d.get("position_seconds"),
-                    "duration": d.get("duration_seconds")}
+                    "duration": d.get("duration_seconds"),
+                    # when `position` was true; the page advances it locally so
+                    # the readout keeps moving between (cached) probes
+                    "sampled_at": time.time()}
             if data["title"]:
                 try:
                     await _ensure_plex_index()

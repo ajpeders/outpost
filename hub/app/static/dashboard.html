@@ -162,6 +162,7 @@
             <div class="media-line hidden" id="media-plex"></div>
             <div class="media-live hidden" id="media-live">
               <div class="media-line" id="media-live-title"></div>
+              <div class="media-line" id="media-live-name"></div>
               <div class="media-sub hidden" id="media-live-sub"></div>
               <div class="media-bar hidden" id="media-live-bar"><i></i></div>
             </div>
@@ -246,6 +247,7 @@ const el = {
   mediaPlex: document.getElementById('media-plex'),
   mediaLive: document.getElementById('media-live'),
   mediaLiveTitle: document.getElementById('media-live-title'),
+  mediaLiveName: document.getElementById('media-live-name'),
   mediaLiveSub: document.getElementById('media-live-sub'),
   mediaLiveBar: document.getElementById('media-live-bar'),
   mediaLiveFill: document.querySelector('#media-live-bar i'),
@@ -503,9 +505,9 @@ function renderHomelab(h) {
     show(el.mediaArt, false);
   }
 
-  if (plex) {
-    const n = plex.sessions || 0;
-    let txt = n === 0 ? 'Plex idle' : 'Plex ' + n + (n === 1 ? ' stream' : ' streams');
+  if (plex && plex.sessions) {
+    const n = plex.sessions;
+    let txt = 'Plex ' + n + (n === 1 ? ' stream' : ' streams');
     if (plex.transcodes) txt += ' (' + plex.transcodes + ' transcode)';
     const titles = (plex.titles || []).filter(Boolean).slice(0, 3);
     el.mediaPlex.replaceChildren(document.createTextNode(txt));
@@ -520,23 +522,28 @@ function renderHomelab(h) {
     show(el.mediaPlex, false);
   }
 
-  // livestream: title + position/duration. The hub serves the last good value
-  // (stale) when the title API blips, so this persists instead of vanishing.
+  // livestream: "Jetstream" + title + position/duration. The hub serves the
+  // last good value (stale) when the title API blips, so this persists instead
+  // of vanishing. The position is advanced locally from `sampled_at` (see
+  // tickLive) — the hub caches the probe for minutes, the overlay only
+  // re-renders once a minute, and the readout should still keep moving.
   if (live) {
     el.mediaLiveTitle.replaceChildren();
     if (live.playing) {
       const dot = document.createElement('span'); dot.className = 'live-dot';
       el.mediaLiveTitle.appendChild(dot);
     }
-    el.mediaLiveTitle.appendChild(document.createTextNode(live.title));
-    const pos = live.position, dur = live.duration;
-    if (pos != null && dur) {
-      el.mediaLiveSub.textContent = fmtClock(pos) + ' / ' + fmtClock(dur)
-        + (live.stale ? ' · reconnecting' : '');
-      el.mediaLiveFill.style.width = Math.min(100, 100 * pos / dur) + '%';
+    el.mediaLiveTitle.appendChild(document.createTextNode('Jetstream'));
+    el.mediaLiveName.textContent = live.title;
+    if (live.position != null && live.duration) {
+      liveClock = { pos: live.position, dur: live.duration, playing: !!live.playing,
+                    stale: !!live.stale,
+                    at: live.sampled_at ? live.sampled_at * 1000 : Date.now() };
+      tickLive();
       show(el.mediaLiveSub, true);
       show(el.mediaLiveBar, true);
     } else {
+      liveClock = null;
       el.mediaLiveSub.textContent = live.stale ? 'reconnecting…' : '';
       show(el.mediaLiveSub, !!live.stale);
       show(el.mediaLiveBar, false);
@@ -544,10 +551,23 @@ function renderHomelab(h) {
     show(el.mediaLive, true);
     any = true;
   } else {
+    liveClock = null;
     show(el.mediaLive, false);
   }
   show(el.tileMedia, any);
 }
+// Livestream position = last sampled position + wall-clock elapsed since the
+// sample (clamped to the duration; frozen while paused).
+let liveClock = null;
+function tickLive() {
+  if (!liveClock) return;
+  let pos = liveClock.pos;
+  if (liveClock.playing) pos = Math.min(liveClock.dur, pos + (Date.now() - liveClock.at) / 1000);
+  el.mediaLiveSub.textContent = fmtClock(pos) + ' / ' + fmtClock(liveClock.dur)
+    + (liveClock.stale ? ' · reconnecting' : '');
+  el.mediaLiveFill.style.width = Math.min(100, 100 * pos / liveClock.dur) + '%';
+}
+setInterval(tickLive, 1000);
 function cachedHomelab() {
   try { return JSON.parse(localStorage.getItem(HOMELAB_CACHE_KEY) || 'null'); }
   catch (e) { return null; }

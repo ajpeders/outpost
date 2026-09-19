@@ -233,18 +233,24 @@ class OverlayRenderer:
             time.sleep(0.25)
         return False
 
-    def _painted(self, timeout: float = 3.0) -> bool:
+    def _painted(self, timeout: float = 6.0) -> bool:
         """Wait until the dashboard has actually drawn its content.
 
         This replaced a flat `sleep(SETTLE)`: the fixed 2s wait was most of a
         3s render, and it was both too long on a warm renderer and a guess on
-        a cold one. Poll the two fields that arrive last — the clock (local,
-        instant) and the weather temperature (a hub fetch) — so we capture as
-        soon as there is something worth capturing."""
+        a cold one. Poll the fields that arrive last — the clock (local,
+        instant), the weather temperature (a hub fetch), and the homelab probe
+        (server readouts drawn, or the tile hidden because the probe failed) —
+        so we capture as soon as there is something worth capturing. The
+        homelab check matters on the first frame after a mode switch: the
+        hub's cache is cold then, the probe (SSH + Plex index) can take
+        seconds, and whatever we grab sits on the TV for a whole refresh."""
         end = time.time() + timeout
         expr = ("(((document.getElementById('time')||{}).textContent||'').length > 3) && "
                 "(['','–','-'].indexOf((((document.getElementById('wx-temp')||{})"
-                ".textContent)||'').trim()) === -1)")
+                ".textContent)||'').trim()) === -1) && "
+                "(document.getElementById('server-row').children.length > 0 || "
+                "document.getElementById('tile-server').classList.contains('hidden'))")
         while time.time() < end:
             r = self._session_send("Runtime.evaluate",
                                    {"expression": expr, "returnByValue": True})

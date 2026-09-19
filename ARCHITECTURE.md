@@ -107,14 +107,21 @@ with current conditions, server, media, alarm, now-playing). In `?overlay=1` mod
 transparent and mpv composites it over a hardware-decoded aerial; the page keeps
 an empty, fixed-width `#sec` slot and `aerial-clock.lua` draws the live seconds
 there (`AERIAL_SEC_X/Y/FS`, measured from the 3840x2160 render). `aerial-mode.py`
-captures the PNG as soon as `#time` has text and `#wx-temp` is not `–`, so those
-two ids and the `–` sentinel are a contract. Weather and homelab are cache-first
-in `localStorage` (10 min) so a slow probe never stalls the capture; the hub's
-`HOMELAB_TTL` is 120s. The media tile shows the active Plex session's poster
-(`/api/plex/artwork`, proxied so the token stays server-side), falling back to
-the livestream title looked up in Plex by name, plus the livestream title with
-position/duration and a progress bar; the hub keeps the last good livestream
-state (`_live_cache`) and serves it stale when the title API blips, so the line
+captures the PNG as soon as `#time` has text, `#wx-temp` is not `–`, and the
+homelab probe has settled (`#server-row` has children, or `#tile-server` is
+hidden), so those ids and the `–` sentinel are a contract. Weather and homelab
+are cache-first in `localStorage` (10 min) so a slow probe rarely stalls the
+capture, but the first frame after a mode switch (cold hub cache, stale page
+cache) waits up to 6s for the homelab data rather than shipping empty tiles
+for a whole refresh; the hub's `HOMELAB_TTL` is 120s. The media tile shows the
+active Plex session's poster (`/api/plex/artwork`, proxied so the token stays
+server-side), falling back to the livestream title looked up in Plex by name;
+a Plex line only when something is actually streaming; and a "Jetstream" line
+with the live title, position/duration and a progress bar. The hub stamps the
+live position with `sampled_at` and the page advances it locally every second
+(`tickLive`), so the readout keeps moving despite the 120s probe cache and the
+once-a-minute overlay redraw. The hub keeps the last good livestream state
+(`_live_cache`) and serves it stale when the title API blips, so the line
 persists instead of vanishing. The server tile (labelled with the host's name)
 shows a 3x2 grid of icon + value readouts — ping / CPU / RAM / disk% / temp /
 uptime; CPU is the real load figure (may exceed 100% on an over-subscribed box). Non-overlay mode is a static aurora

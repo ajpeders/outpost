@@ -378,6 +378,23 @@ Steps, in order:
 7. **Acceptance on the Pi** — checklist in the spec; update ARCHITECTURE.md
    (dashboard/overlay pipeline) and HOWTO.md when built.
 
+## Dashboard first-frame + Jetstream progress (2026-09-19) ✅ *(built + deployed)*
+
+Alex saw empty server/media tiles right after switching the TV back to the Pi.
+Cause: `aerial-mode.py` captured the first overlay as soon as the clock and
+weather had painted, before `/api/homelab` (cold hub cache → SSH + Plex index,
+seconds) returned; that empty frame then sat on the TV for the 60s refresh.
+
+- `_painted()` now also waits (≤6s) for the homelab tile to settle.
+- Media tile says **Jetstream** (+ live dot) over the title; "Plex idle" is
+  gone — the Plex line only appears when a Plex session is actually streaming.
+- `/api/homelab` `live.sampled_at` + page-side `tickLive()`: the position and
+  progress bar advance locally every second instead of freezing for up to 2
+  minutes (120s probe cache) — every overlay redraw now shows the true time.
+- Follow-up (not done): the TV overlay is a PNG redrawn once a minute, so on
+  the TV the readout still steps per minute. Live ticking would need
+  `aerial-clock.lua` to draw the progress line like it draws the seconds.
+
 ## Current Priorities
 
 1. **Finish the ATV Plex path** — flip Advertise as Player on the Apple TV, then
