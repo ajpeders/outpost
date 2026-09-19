@@ -121,6 +121,11 @@
   .np-title { font-size: 1.4vw; font-weight: 700; overflow: hidden; text-overflow: ellipsis;
               white-space: nowrap; }
   .np-sub { font-size: 1vw; opacity: .8; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .np-body { display: flex; align-items: center; gap: .8vw; min-width: 0; flex: 1; }
+  .np-art { width: 3vw; height: 3vw; object-fit: cover; border-radius: .4vw; flex: none;
+            background: rgba(255,255,255,.06); }
+  .np-lines { min-width: 0; flex: 1; }
+  .np-lines > * + * { margin-top: .4vh; }
 </style>
 </head>
 <body>
@@ -169,9 +174,14 @@
         <div class="alarm-when" id="alarm-when"></div>
       </section>
       <section class="tile nowplaying hidden" id="tile-np">
-        <div class="tile-label">Now Playing</div>
-        <div class="np-title" id="np-title"></div>
-        <div class="np-sub" id="np-sub"></div>
+        <div class="tile-label" id="np-label">Now Playing</div>
+        <div class="np-body">
+          <img class="np-art hidden" id="np-art" alt="">
+          <div class="np-lines">
+            <div class="np-title" id="np-title"></div>
+            <div class="np-sub" id="np-sub"></div>
+          </div>
+        </div>
       </section>
     </footer>
   </div>
@@ -243,6 +253,8 @@ const el = {
   alarmTime: document.getElementById('alarm-time'),
   alarmWhen: document.getElementById('alarm-when'),
   tileNp: document.getElementById('tile-np'),
+  npLabel: document.getElementById('np-label'),
+  npArt: document.getElementById('np-art'),
   npTitle: document.getElementById('np-title'),
   npSub: document.getElementById('np-sub'),
 };
@@ -330,8 +342,15 @@ renderCachedWeather();
 weather();
 setInterval(weather, 15 * 60 * 1000);
 
-// ---- now playing (same-origin hub) ----
+// ---- now playing (same-origin hub): Pi screen player first, then Apple TV music ----
 let lastNowPlaying = '';
+function setNpArt(src) {
+  if (!src) { el.npArt.removeAttribute('src'); show(el.npArt, false); return; }
+  if (el.npArt.getAttribute('src') === src) return;
+  el.npArt.onerror = () => show(el.npArt, false);
+  el.npArt.src = src;
+  show(el.npArt, true);
+}
 async function nowPlaying() {
   try {
     const s = await fetchJson('/api/screen/status', 2500);
@@ -345,16 +364,40 @@ async function nowPlaying() {
       }
       const sig = title + '\n' + sub;
       if (sig !== lastNowPlaying) {
+        el.npLabel.textContent = 'Now Playing';
         el.npTitle.textContent = title;
         el.npSub.textContent = sub;
+        setNpArt('');
         lastNowPlaying = sig;
       }
       show(el.tileNp, true);
-    } else {
-      lastNowPlaying = '';
-      show(el.tileNp, false);
+      return;                                   // Pi playback wins over ATV music
     }
-  } catch (e) {}
+  } catch (e) { return; }                      // screen probe failed — keep last-good
+
+  // Nothing on the Pi. Surface Apple Music / Plex music playing on the Apple TV.
+  try {
+    const d = await fetchJson('/api/atv/state', 2500);
+    const isMusic = d && d.title
+      && (d.app_id === 'com.apple.TVMusic' || d.app === 'Music'
+          || (d.media_type || '').toLowerCase() === 'music');
+    if (isMusic) {
+      const sub = [d.artist, d.album].filter(Boolean).join(' · ') || 'On the Apple TV';
+      const sig = 'atv|' + d.title + '\n' + sub;
+      if (sig !== lastNowPlaying) {
+        el.npLabel.textContent = 'Music';
+        el.npTitle.textContent = d.title;
+        el.npSub.textContent = sub;
+        setNpArt('/api/atv/artwork?v=' + encodeURIComponent(d.title + '|' + (d.artist || '')));
+        lastNowPlaying = sig;
+      }
+      show(el.tileNp, true);
+      return;
+    }
+    lastNowPlaying = '';                       // ATV reachable but not playing music
+    setNpArt('');
+    show(el.tileNp, false);
+  } catch (e) { /* ATV probe failed — keep last-good */ }
 }
 nowPlaying(); setInterval(nowPlaying, 5000);
 
