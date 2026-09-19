@@ -156,6 +156,29 @@ the TV set (CEC), hosts the hub app, and runs scheduled automations.
   stopped. Uses the same DRM-master / transparent-cursor / cage flags as the
   idle kiosk (`screen/mtv-kiosk.sh` modeled after `screen/kiosk.sh`).
 
+- **Known issues (2026-09-19) — the kiosk approach is the wrong tool.** Verified
+  on the Pi with `mtv-screen` active:
+  - *Buffery video*: chromium runs with `--disable-gpu` under cage/pixman and
+    software-decodes the MP4s at 3840x2160@30 — one chromium process pegged at
+    100% CPU. This is exactly the dead end recorded under "Aerials on the
+    dashboard" (cage/chromium can't paint a video surface). The fix is the
+    same one: play through **mpv on DRM** (`hwdec=v4l2m2m`) like the jetstream
+    live stream, not through a browser.
+  - *No audio*: the page starts muted by design ("TAP FOR SOUND", needs a
+    click) and the root cage session has no PipeWire/Pulse anyway. Moot once
+    mpv plays it.
+  - *Cursor in the middle of the screen*: `screen/install-cursor.sh` was never
+    run on this Pi (`/usr/local/share/icons` absent), so the transparent
+    cursor theme `mtv-kiosk.sh` points at doesn't exist. Not in the runbook's
+    deploy steps.
+- **Rework (planned):** MTV is a deterministic clock-driven schedule over
+  `/videos/manifest.json` + `/videos/<id>.mp4` (seeded shuffle, epoch
+  1981-08-01, seed 1981 — see `mtv.js` `startLocal`). screen-player should
+  fetch the manifest, compute the on-air item + offset, and `POST /play` it via
+  mpv with `--start=<offset>`, chaining to the next item on EOF. Now-playing
+  credits can go through the existing overlay renderer. Drops `mtv-screen`,
+  cage and chromium from the path entirely.
+
 ## UI overhaul (2026-07-20) ✅ *(built + deployed)*
 
 - Controller visual system rebuilt around a stronger now-playing command hero,
