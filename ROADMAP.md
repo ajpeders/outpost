@@ -351,6 +351,33 @@ file* to the Apple TV's Plex app instead, which decodes 4K DV natively.
   Plex rescanned — it's now a 4K + 1080p version pair and resolves as 4k.
   `_4k_archive` is empty; put future 4K rips straight into `movies/`.
 
+## Dashboard mini stream (2026-09-19) 📋 *(planned, spec written, no code)*
+
+A small live video in the top-right corner of the aerial dashboard, picked
+from the phone: **Off | Livestream | MTV**, with a **Sound** toggle. Movie
+(library file) deferred to v2. Design: `docs/superpowers/specs/2026-09-19-dashboard-mini-stream-design.md`.
+
+Key constraint: Chromium can't paint video on the Pi, so mpv draws the corner
+stream. mpv draws one video, so by default the **aerials pause** while the
+mini stream is on and the aurora gradient fills in behind the board.
+
+Steps, in order:
+
+1. **Spike** — measure `lavfi-complex` compositing (1080p aerial + corner
+   stream) on the Pi. Decides whether aerials can keep playing. Record the
+   numbers here.
+2. **`hub/app/mtv_schedule.py`** — port of `mtv.js` `startLocal`; unit-tested
+   against JS fixtures. Shared with the Phase 8 MTV mpv rework.
+3. **Hub API** — `GET/POST /api/dashboard/mini`, persisted `data/hub/mini.json`,
+   resolves URL/start/geometry.
+4. **`aerial-mode.py`** — 5 s tick polling the hub; swap between aerial
+   playlist and the corner stream; audio enabled-but-muted at launch.
+5. **`dashboard.html`** — `mini=1` overlay mode: aurora background with a
+   transparent hole, weather shifts left, source label, title in Media tile.
+6. **`index.html`** — segmented control + sound toggle in the Watch panel.
+7. **Acceptance on the Pi** — checklist in the spec; update ARCHITECTURE.md
+   (dashboard/overlay pipeline) and HOWTO.md when built.
+
 ## Current Priorities
 
 1. **Finish the ATV Plex path** — flip Advertise as Player on the Apple TV, then
@@ -362,7 +389,9 @@ file* to the Apple TV's Plex app instead, which decodes 4K DV natively.
 3. **Real-listening validation** — exercise Plex queue next/prev/stop and Apple
    TV artwork during a real playlist session; ROADMAP still calls these out as
    verify-needed.
-4. **Look into music now-playing on the TV dashboard** — surface what's playing
+4. **Dashboard mini stream** — run the step-1 spike, then build per the
+   2026-09-19 spec (section above).
+5. **Look into music now-playing on the TV dashboard** — surface what's playing
    (Apple Music via the Apple TV, and Plex music) on the dashboard overlay, not
    just Pi media. The appletv service already exposes now-playing + artwork
    (`/api/atv/artwork`), so the media/now-playing tile could show it.
