@@ -13,6 +13,9 @@
 # Then enable what you want:
 #   sudo systemctl enable --now screen-player
 #   sudo systemctl enable --now aerial-screen   # OR kiosk-screen, not both
+# mtv-screen is installed but stays stopped until the hub swaps to it
+# (POST /api/screen/mtv); the kiosk units Conflicts= each other, so only
+# one holds DRM master at a time.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -21,7 +24,7 @@ DEST=/etc/systemd/system
 
 units=("$@")
 if [ ${#units[@]} -eq 0 ]; then
-  units=(screen-player aerial-screen kiosk-screen tv-keepalive)
+  units=(screen-player aerial-screen kiosk-screen mtv-screen tv-keepalive)
 fi
 
 for u in "${units[@]}"; do

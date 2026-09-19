@@ -353,8 +353,9 @@
           <div class="panel-note">Pi HDMI · HDR10</div>
         </div>
         <div class="panel-body">
-          <div class="tv-grid" style="grid-template-columns:repeat(2,minmax(0,1fr))">
+          <div class="tv-grid" style="grid-template-columns:repeat(3,minmax(0,1fr))">
             <button id="w-live" class="secondary" data-watch="livestream">Livestream</button>
+            <button id="w-mtv" class="secondary" data-watch="mtv">MTV</button>
             <button id="w-library" class="secondary" data-watch="library">Library</button>
             <button id="w-dash" class="secondary" data-watch="dashboard">Dashboard</button>
             <button id="w-appletv" class="secondary" data-watch="appletv">Apple TV</button>
@@ -786,6 +787,20 @@ $('#w-live').addEventListener('click', async () => {
     else toast('▶ ' + (r.data?.title || 'Livestream') + ' on the TV');
   } finally { b.disabled = false; b.textContent = label; }
 });
+$('#w-mtv').addEventListener('click', async () => {
+  const b = $('#w-mtv'), label = b.textContent;
+  if (b.disabled) return;
+  b.disabled = true; b.textContent = 'Starting…';
+  setWatchActive('mtv');
+  libraryPinned = false;
+  showLibrary(false);
+  toast('Starting MTV on the TV…');
+  try {
+    const r = await api('POST', '/api/screen/mtv');
+    if (!r.ok) toast(r.data?.detail || r.data?.error || 'MTV unavailable');
+    else toast('▶ ' + (r.data?.title || 'MTV') + ' on the TV');
+  } finally { b.disabled = false; b.textContent = label; }
+});
 $('#w-library').addEventListener('click', async () => {
   setWatchActive('library');
   libraryPinned = true;
@@ -1042,6 +1057,22 @@ function syncSkipButton() {
   // within the live row. This just decides whether the button is in the DOM at all.
   $('#np-skip').classList.toggle('hidden', !jetstreamCaps.skip);
 }
+
+/* --- MTV capability (Phase 8): hides the MTV button when MTV_URL is unset */
+let mtvEnabled = false;
+async function loadMtvEnabled() {
+  try {
+    const r = await api('GET', '/api/screen/status');
+    mtvEnabled = !!(r.ok && (r.data?.mtv));
+  } catch (e) { mtvEnabled = false; }
+}
+
+function syncMtvButton() {
+  const mtvBtn = $('#w-mtv');
+  if (mtvBtn) {
+    mtvBtn.classList.toggle('hidden', !mtvEnabled);
+  }
+}
 $('#np-skip').addEventListener('click', async () => {
   const btn = $('#np-skip');
   setBusy(btn, true);
@@ -1236,6 +1267,7 @@ async function refreshState() {
   const [status, activeInput, screen] = await Promise.all([
     api('GET', '/api/atv/status'), refreshInput(), api('GET', '/api/screen/status'),
   ]);
+  loadMtvEnabled();  // sync MTV button visibility
   const info = status.data || {};
   $('#dev').textContent = info.name || 'Controller';
   $('#pair').classList.toggle('hidden', !status.ok || !!info.paired);

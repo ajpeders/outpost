@@ -11,6 +11,8 @@ it relaunches mpv so playback self-heals.
   POST /play   {url, headers?:{...}, audio_only?:bool}  -> (re)start playback
   POST /stop                                            -> stop playback
   POST /kiosk/restart                                   -> reload idle dashboard
+  POST /kiosk/mtv                                       -> swap idle kiosk -> MTV page
+  POST /kiosk/idle                                      -> swap MTV page -> idle kiosk
   POST /kiosk/cursor                                    -> reinstall transparent cursor
   GET  /status                                          -> {playing, url}
   GET  /kiosk/status                                    -> kiosk systemd state
@@ -36,6 +38,11 @@ IPC_SOCKET = os.environ.get("SCREEN_MPV_IPC", "/tmp/mpv-ipc")  # for sub toggle 
 # idle-dashboard kiosk service — stopped while mpv plays (both need DRM master),
 # restarted when playback ends.
 KIOSK_SERVICE = os.environ.get("SCREEN_KIOSK_SERVICE", "kiosk-screen")
+# MTV page kiosk service (cage + chromium on MTV_URL). Swapped in by the hub
+# when the user taps the MTV button; only ONE kiosk service can hold DRM
+# master at a time, so /api/screen/kiosk/mtv stops KIOSK_SERVICE and starts
+# MTV_KIOSK_SERVICE.
+MTV_KIOSK_SERVICE = os.environ.get("SCREEN_MTV_KIOSK_SERVICE", "mtv-screen")
 CURSOR_INSTALL = os.environ.get(
     "SCREEN_CURSOR_INSTALL", osp.join(_HERE, "install-cursor.sh"))
 # Reclaims the TV's HDMI input for the Pi (CEC active-source) — the Apple TV
@@ -66,6 +73,32 @@ def _kiosk_restart() -> dict:
                        capture_output=True, text=True, check=False)
     return {"ok": r.returncode == 0, "status": _kiosk_status(),
             "error": (r.stderr or r.stdout).strip()}
+
+
+def _swap_kiosk(target: str) -> dict:
+    """Swap which kiosk service holds DRM master. target = idle or mtv.
+
+    The two services cannot run simultaneously (both need cage/chromium DRM
+    master), so we stop the OTHER one first, then start the requested one.
+    Best-effort: failures return ok=False with the systemctl output so the
+    hub can surface them.
+    """
+    target = (target or "").strip().lower()
+    if target not in ("idle", "mtv"):
+        return {"ok": False, "error": "unknown kiosk target: " + repr(target)}
+    want = KIOSK_SERVICE if target == "idle" else MTV_KIOSK_SERVICE
+    other = MTV_KIOSK_SERVICE if target == "idle" else KIOSK_SERVICE
+    out = []
+    r = subprocess.run(["systemctl", "stop", other], capture_output=True, text=True, check=False)
+    if r.returncode != 0:
+        msg = (r.stderr or r.stdout or "").strip()
+        if "inactive" not in msg.lower() and "not found" not in msg.lower():
+            out.append("stop " + other + ": " + msg)
+    r = subprocess.run(["systemctl", "start", want], capture_output=True, text=True, check=False)
+    if r.returncode != 0:
+        out.append("start " + want + ": " + (r.stderr or r.stdout or "").strip())
+        return {"ok": False, "service": want, "active": "failed", "error": "; ".join(out)}
+    return {"ok": True, "service": want, "active": "active", "logs": out}
 
 
 def _cursor_repair() -> dict:
@@ -813,6 +846,14 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, {"ok": _sub_cycle()})
         elif self.path == "/kiosk/restart":
             result = _kiosk_restart()
+            self._send(200 if result["ok"] else 500, result)
+        elif self.path == "/kiosk/mtv":
+            # MTV swap-in: stop idle kiosk, start MTV kiosk. Called by hub /api/screen/mtv.
+            result = _swap_kiosk("mtv")
+            self._send(200 if result["ok"] else 500, result)
+        elif self.path == "/kiosk/idle":
+            # MTV swap-out: stop MTV kiosk, restart idle kiosk. Called by hub /api/screen/mtv/stop.
+            result = _swap_kiosk("idle")
             self._send(200 if result["ok"] else 500, result)
         elif self.path == "/kiosk/cursor":
             result = _cursor_repair()

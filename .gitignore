@@ -21,3 +21,4 @@ watchdog/
 
 # Claude Code local machine settings
 .claude/settings.local.json
+.playwright-mcp/
