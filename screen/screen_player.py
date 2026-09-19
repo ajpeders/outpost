@@ -75,6 +75,13 @@ def _kiosk_restart() -> dict:
             "error": (r.stderr or r.stdout).strip()}
 
 
+def _unit_active(unit: str) -> bool:
+    """True if the given systemd unit is currently active (best-effort)."""
+    r = subprocess.run(["systemctl", "is-active", unit],
+                       capture_output=True, text=True, check=False)
+    return r.stdout.strip() == "active"
+
+
 def _swap_kiosk(target: str) -> dict:
     """Swap which kiosk service holds DRM master. target = idle or mtv.
 
@@ -89,15 +96,32 @@ def _swap_kiosk(target: str) -> dict:
     want = KIOSK_SERVICE if target == "idle" else MTV_KIOSK_SERVICE
     other = MTV_KIOSK_SERVICE if target == "idle" else KIOSK_SERVICE
     out = []
+
+    # Was the OTHER kiosk on screen before we touch anything? If the swap fails
+    # we put it back, otherwise the TV is left with no unit holding DRM master
+    # (blank HDMI) until something else starts one.
+    was_active = _unit_active(other)
+
     r = subprocess.run(["systemctl", "stop", other], capture_output=True, text=True, check=False)
     if r.returncode != 0:
         msg = (r.stderr or r.stdout or "").strip()
         if "inactive" not in msg.lower() and "not found" not in msg.lower():
             out.append("stop " + other + ": " + msg)
+
     r = subprocess.run(["systemctl", "start", want], capture_output=True, text=True, check=False)
     if r.returncode != 0:
         out.append("start " + want + ": " + (r.stderr or r.stdout or "").strip())
-        return {"ok": False, "service": want, "active": "failed", "error": "; ".join(out)}
+        # Put the previous kiosk back so the TV isn't left blank.
+        restored = False
+        if was_active:
+            rb = subprocess.run(["systemctl", "start", other], capture_output=True, text=True, check=False)
+            restored = rb.returncode == 0
+            if not restored:
+                out.append("restore " + other + ": " + (rb.stderr or rb.stdout or "").strip())
+        return {"ok": False, "service": want, "active": "failed",
+                "restored": other if restored else None,
+                "error": "; ".join(out)}
+
     return {"ok": True, "service": want, "active": "active", "logs": out}
 
 
