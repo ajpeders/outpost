@@ -52,6 +52,7 @@ JETSTREAM_SKIP_URL = os.environ.get("JETSTREAM_SKIP_URL", "").strip()
 # jetstream LAN bypass in place the Pi reaches /hls tokenless, so this is only
 # needed if that bypass is ever removed; empty → no Cookie header.
 JETSTREAM_COOKIE = os.environ.get("JETSTREAM_COOKIE", "")  # e.g. "lt=<token>"
+MTV_URL = os.environ.get("MTV_URL", "")
 STATIC = Path(__file__).parent / "static"
 
 
@@ -431,7 +432,9 @@ async def plex_stop():
 async def screen_status():
     try:
         r = await client.get(f"{SCREEN_URL}/status")
-        return r.json()
+        status = r.json()
+        status["mtv"] = bool(MTV_URL)
+        return status
     except httpx.RequestError as exc:
         return JSONResponse(status_code=502, content={"error": f"screen player unreachable: {exc}"})
 
@@ -588,6 +591,53 @@ async def jetstream_start():
 async def jetstream_stop():
     """Stop the AirPlay stream on the Apple TV."""
     await client.post(f"{ATV_URL}/api/stream/stop")
+    return {"ok": True}
+
+
+@app.post("/api/screen/mtv")
+async def screen_mtv():
+    """Swap the kiosk service to mtv-screen (cage + chromium on MTV_URL).
+
+    The MTV page is a website, not a video file, so mpv cannot render it -
+    we swap which systemd unit holds DRM master instead. mtv-screen runs
+    screen/mtv-kiosk.sh (parallel to screen/kiosk.sh, but pointed at MTV_URL).
+    Reuses _wake_tv_to_pi so the TV warms while the kiosk swap runs.
+    """
+    global _active_input
+    if not MTV_URL:
+        raise HTTPException(status_code=503, detail="MTV_URL not configured")
+    wake = _wake_tv_to_pi()
+    _active_input = "pi"
+    title = MTV_URL.split("://", 1)[-1].split("/", 1)[0] or "MTV"
+    try:
+        r = await client.post(f"{SCREEN_URL}/kiosk/mtv", timeout=15.0)
+    except httpx.RequestError as exc:
+        await wake
+        return JSONResponse(status_code=502, content={"ok": False, "error": f"screen player unreachable: {exc}"})
+    await wake
+    if not r.is_success:
+        return JSONResponse(status_code=r.status_code, content={"ok": False, "error": (r.text or "").strip() or "kiosk swap failed"})
+    return {"ok": True, "playing": "mtv", "target": "pi", "title": title, "url": MTV_URL}
+
+
+@app.post("/api/screen/mtv/stop")
+async def screen_mtv_stop():
+    """Swap the kiosk service back to kiosk-screen (idle dashboard).
+
+    No mpv was started for MTV (it's a webpage kiosk, not a video), so we
+    do not call /api/screen/stop. We still wake the TV and claim the Pi
+    input so the dashboard appears on the right HDMI even if the TV was off."""
+    global _active_input
+    _active_input = "pi"
+    wake = _wake_tv_to_pi()
+    try:
+        r = await client.post(f"{SCREEN_URL}/kiosk/idle", timeout=15.0)
+    except httpx.RequestError as exc:
+        await wake
+        return JSONResponse(status_code=502, content={"ok": False, "error": f"screen player unreachable: {exc}"})
+    await wake
+    if not r.is_success:
+        return JSONResponse(status_code=r.status_code, content={"ok": False, "error": (r.text or "").strip() or "kiosk swap-back failed"})
     return {"ok": True}
 
 

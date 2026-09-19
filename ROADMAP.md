@@ -145,6 +145,17 @@ the TV set (CEC), hosts the hub app, and runs scheduled automations.
   in hero/dashboard/resume rows, alarm rows no longer squish on narrow phones,
   idle hero copy, UI tested headless end-to-end (13 interactive checks).
 
+## Phase 8 — TV website launch (2026-09-18) ✅ *(built)*
+
+- **MTV button** — hub now exposes `POST /api/screen/mtv` (plays MTV_URL
+  fullscreen on the Pi's HDMI via Chromium kiosk), `POST /api/screen/mtv/stop`
+  (returns to the idle dashboard), and `GET /api/screen/status` includes
+  an `mtv` capability flag for UI visibility. Web UI shows a **MTV** button
+  in the "Watch on the TV" panel; hides when MTV_URL is unset. TV wakes to Pi
+  input on launch, stops any existing playback, and restores dashboard when
+  stopped. Uses the same DRM-master / transparent-cursor / cage flags as the
+  idle kiosk (`screen/mtv-kiosk.sh` modeled after `screen/kiosk.sh`).
+
 ## UI overhaul (2026-07-20) ✅ *(built + deployed)*
 
 - Controller visual system rebuilt around a stronger now-playing command hero,

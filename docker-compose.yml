@@ -73,6 +73,8 @@ services:
       JETSTREAM_TITLE_URL: ${JETSTREAM_TITLE_URL:-}
       JETSTREAM_SKIP_URL: ${JETSTREAM_SKIP_URL:-}
       JETSTREAM_COOKIE: ${JETSTREAM_COOKIE:-}
+      # Full URL of a webpage to display fullscreen on the Pi's HDMI (optional).
+      MTV_URL: ${MTV_URL:-}
       # Homelab system stats over SSH (/api/homelab); empty disables the probe
       HOMELAB_SSH: ${HOMELAB_SSH:-}
       HOMELAB_SSH_KEY: ${HOMELAB_SSH_KEY:-/ssh/id_ed25519}

@@ -1,0 +1,25 @@
+[Unit]
+Description=Living-room MTV page (cage + chromium on the Pi HDMI playing MTV_URL)
+# Brought up by the hub when the user taps the MTV button on the web UI.
+# Only one kiosk can hold DRM master at a time, so this Conflicts= the other
+# two unit files. The hub's /api/screen/kiosk/mtv stops whichever idle kiosk
+# is configured (SCREEN_KIOSK_SERVICE, e.g. aerial-screen) and starts this
+# one; /api/screen/kiosk/idle swaps back.
+After=network-online.target docker.service screen-player.service
+Wants=network-online.target
+
+Conflicts=kiosk-screen.service aerial-screen.service
+
+[Service]
+Type=simple
+User=root
+# MTV_URL is exported into the hub env; pull it from .env so this unit inherits
+# the same value without a separate systemd EnvironmentFile.
+EnvironmentFile=-%%REPO%%/.env
+ExecStart=%%REPO%%/screen/mtv-kiosk.sh
+# self-heal on crash; the hub's /api/screen/mtv/stop stays stopped on purpose
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
