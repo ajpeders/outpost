@@ -56,9 +56,13 @@ Added to `admin/main.py` (FastAPI). Reads `/videos/manifest.json` and
   32-bit value divided by 2^32, `Math.floor(rnd() * (i + 1))` for the swap
   index, and string comparison of ids for the sort. Durations are the floats
   from the manifest; `offset` is `time.time()` based, not integer seconds.
-- `title` is the raw manifest title. The credit split into artist / song
-  stays where it is today (the player's `cleanTitle`), and the same split is
-  ported alongside so `now.artist` / `now.song` are also returned.
+- `title` is the raw manifest title. `now.artist` / `now.song` (and the same
+  on `next`) come from a port of the player's `creditText` (`mtv.js`): prefer
+  the manifest item's `artist` / `track` fields when present, otherwise strip
+  the "(Official Video)"-style suffix and split on the first " - ".
+- Accepted divergence: the browser player skips ids that failed to play in
+  that session (its `bad` set), so one viewer with a broken file can be a song
+  off from the server. Nothing else in the math is session-local.
 - The admin page's NOW PLAYING panel switches to this endpoint and its
   JavaScript copy of the math is deleted. Count of implementations stays at
   two (browser player, Python) instead of growing to three.
@@ -66,8 +70,9 @@ Added to `admin/main.py` (FastAPI). Reads `/videos/manifest.json` and
   resolves `mtv.thelunadog.com` to the LAN address and gets 200 today.
 - Test: `admin/test_schedule.py` runs a fixture manifest through the Python
   port and through the JavaScript functions under `node` (extracted verbatim
-  from `mtv.js`) and asserts identical orderings for channels 1–4 and
-  identical on-air picks at three fixed timestamps.
+  from `mtv.js`) and asserts identical orderings for channels 1–4, identical
+  on-air picks at three fixed timestamps, and identical `creditText` output
+  for titles with and without `artist`/`track` fields.
 
 ### 2. screen-player: `mtv` profile (`screen/screen_player.py`)
 
@@ -77,64 +82,122 @@ Added to `admin/main.py` (FastAPI). Reads `/videos/manifest.json` and
 {"source": "mtv", "url": "https://mtv.thelunadog.com", "channel": 1}
 ```
 
-`url` is the site base (from `MTV_URL`), not a media URL. On receipt:
+`url` is the site base (from `MTV_URL`), not a media URL. Three new units,
+each with one job:
 
-1. `GET {url}/admin/api/now?ch={channel}` (5 s timeout). Failure → 502 with
-   the upstream error; nothing is spawned.
-2. Set `_profile = "mtv"`, `_source = "mtv"`, `_title = now.artist`,
-   `_subtitle = now.song`, `_url = {url}{url_base}{now.id}.mp4`.
-3. `_build_args` for `mtv`: the `live` flag set (`--vo=drm`, `--hwdec=no`,
-   IPC socket, small cache) plus `--start={offset}`, `--prefetch-playlist=yes`,
-   `--keep-open=no`, and OSD sizing (`--osd-font-size`, `--osd-margin-*`,
-   `--osd-align-x=left --osd-align-y=bottom`) tuned once for 4K viewing from
-   the couch. Drop `--hls-bitrate` (not HLS).
-4. Spawn as today (`_spawn` handles kiosk stop + DRM handoff).
-5. Start the **conductor** thread for this spawn.
+**(a) `mtv_now(base, channel) -> dict`.** `GET {base}/admin/api/now?ch=…`,
+5 s timeout, raises `MtvUnavailable(str)` on any HTTP/network/JSON failure.
+Pure client, no state. Used by (b) and (c).
 
-**Conductor.** One thread per mtv spawn, exits when `_proc` changes or the
-profile leaves `mtv`. It:
+**(b) `_play_mtv(base, channel)` — the "ask now, spawn at offset" entry
+point.** Called by the `/play` handler and by the supervisor on respawn; the
+dashboard mini-stream spec will call it too.
 
-- Waits for the IPC socket, then `loadfile {next.url} append` so mpv prefetches
-  the following song.
-- Shows credits: `show-text "{artist}\n{song}" 8000` at start, and again when
-  `remaining - 10 s` elapses (timer armed from the `now` response).
-- Observes `playlist-pos` / `end-file` via IPC events (`observe_property`).
-  On every file change: re-query `/admin/api/now`; set title/subtitle for
-  `/status`; append the new `next`; arm the credits timers. If the file mpv
-  just started is not `now.id`, or mpv's `time-pos` differs from `now.offset`
-  by more than 2 s, correct with `loadfile {now.url} replace` plus
-  `--start` via `loadfile … replace start={offset}`, then append `next`.
-- If `/admin/api/now` fails mid-session, keep playing whatever is queued and
-  retry on the next file change; log once per failure streak.
+1. `now = mtv_now(base, channel)`. On `MtvUnavailable` → the caller decides
+   (see below); nothing is spawned.
+2. Set globals: `_profile="mtv"`, `_source="mtv"`, `_url={base}{url_base}{now.id}.mp4`,
+   `_title=now.artist`, `_subtitle=now.song`, and a new `_start: float | None`
+   (= `now.offset`) which `_build_args` reads for the `mtv` profile only and
+   `_stop()` clears. Also stash `_mtv = {"base": base, "channel": channel,
+   "next": now.next}` for the conductor.
+3. `_build_args(profile="mtv")`: the `live` flag set (`--vo=drm`, `--hwdec=no`,
+   `--input-ipc-server`, small cache, `--sid=no`) minus `--hls-bitrate`, plus
+   `--prefetch-playlist=yes`, `--keep-open=no`, OSD sizing constants
+   (`--osd-font-size`, `--osd-margin-x/y`, `--osd-align-x=left`,
+   `--osd-align-y=bottom`, `--osd-border-size`) tuned once for 4K from the
+   couch. **No `--start` and no file on the command line**: `--start` is a
+   per-file option and would apply to every appended song. Instead mpv is
+   spawned with `--idle=yes` and the conductor loads every entry with its
+   own per-file `start` (`loadfile {url} replace -1 start={offset}`, then
+   `loadfile {next_url} append -1 start=0`). One mechanism for first song,
+   next song and drift correction. (mpv ≥ 0.38 `loadfile` syntax:
+   `<url> <flags> <index> <options>`; the Pi runs 0.40.0 — the plan pins
+   this and verifies the first loadfile on the box.) `_start` is therefore
+   not read by `_build_args`; it only feeds the conductor's first loadfile.
+4. `_spawn()` as today (kiosk stop, DRM handoff), then start (c).
 
-**Supervisor.** For `_profile == "mtv"` an mpv death is handled by calling the
-same "ask now, spawn at offset" entry point rather than re-spawning `_url`,
-so a crash rejoins the broadcast instead of restarting a song. The existing
-settle delay applies.
+`/play` with `source: "mtv"` calls (b); on `MtvUnavailable` returns 502
+`{"error": "mtv: <reason>"}`. Success body:
+`{"ok": true, "url": <mp4 url>, "profile": "mtv", "source": "mtv",
+"title": <artist>, "subtitle": <song>}` — the hub relays title/subtitle.
+
+**(c) Conductor thread — `MtvConductor(proc, mtv_state)`.** One per mtv
+spawn; exits when `_proc` is no longer `proc` or `_profile != "mtv"`.
+Owns a **persistent** IPC connection (the existing `_ipc()` is one-shot
+request/reply and stays that way for `/control` and `/status`). Interface:
+
+- `events`: connect to the socket (retry for 5 s after spawn), send
+  `observe_property 1 playlist-pos`, read newline-delimited JSON forever.
+  Replies to its own commands are matched by `request_id`; property-change
+  events drive the state machine below. Socket loss → thread exits; the
+  supervisor's respawn creates a new conductor.
+- `command(list)`: send on the same socket with a fresh `request_id`; a lock
+  serialises writes, the reader thread routes replies. Two commands are
+  used: `loadfile` and `show-text`.
+
+State machine:
+
+1. On connect: `loadfile now replace -1 start={offset}`; `loadfile next append
+   -1 start=0`; credits at start; arm end-credits.
+2. On `playlist-pos` change (a song boundary, or our own replace): query
+   `mtv_now`. If `now.id` equals the file mpv is playing (`path` property)
+   and `|time-pos − now.offset| ≤ 2 s`: update `_title/_subtitle`, append the
+   new `next` with `start=0`, credits at start, arm end-credits. Otherwise
+   (drift or library change): `loadfile now replace -1 start={offset}`, then
+   append `next`, credits, arm. The replace itself triggers another
+   `playlist-pos` event; the check passes on that pass.
+3. `mtv_now` failure mid-session: keep playing what is queued (mpv already
+   has `next`), log once per failure streak, retry on the next boundary. If
+   the playlist runs dry (mpv goes idle with no next), retry `mtv_now` every
+   5 s until it answers, then step 1.
+4. Credits: `show-text "{artist}\n{song}" 8000` at each song start; the end
+   credits are armed from mpv's `time-pos`, not wall clock — the conductor
+   also observes `time-pos` (property id 2, mpv throttles it to ~4/s) and
+   fires once when `duration − time-pos ≤ 10`. Pause via `/control` therefore
+   delays the credits correctly.
+
+**Supervisor.** For `_profile == "mtv"`, on mpv death after the existing
+settle delay call `_play_mtv(_mtv.base, _mtv.channel)` instead of
+re-spawning `_url`, so a crash rejoins the broadcast. If that raises
+`MtvUnavailable`, retry on each supervisor tick (3 s) for up to 60 s, then
+give up: `_stop()` and `_kiosk("start")` (dashboard back, same as a movie
+ending) and log the reason. The `live`-only decode-corruption and
+video-freeze watchdogs do **not** apply to `mtv` (no HLS discontinuities);
+stated here so the omission is deliberate.
 
 **Deleted:** `MTV_KIOSK_SERVICE`, `/kiosk/mtv` and the `mtv` branch of
-`_swap_kiosk`. `/kiosk/idle` stays (other callers).
+`_swap_kiosk`. `/kiosk/idle` stays (other callers). The module docstring
+lines describing `/kiosk/mtv` go too.
 
 ### 3. Hub (`hub/app/main.py`, `hub/app/static/*`)
 
 - `POST /api/screen/mtv` mirrors the jetstream livestream handler: wake TV to
   Pi input, `POST {SCREEN_URL}/play` with the mtv body above, return
-  `{"ok": true, "playing": "mtv", "target": "pi", "title", "subtitle"}`.
-  `MTV_URL` unset → 503 as today.
-- `POST /api/screen/mtv/stop` is removed; the UI's stop calls the existing
-  `POST /api/screen/stop`, which already returns the TV to the idle kiosk.
+  `{"ok": true, "playing": "mtv", "target": "pi", "title", "subtitle"}` with
+  title/subtitle taken from screen-player's `/play` response. Screen-player
+  502 → relayed as 502 `{"ok": false, "error": …}`. `MTV_URL` unset → 503
+  as today. The hub's 30 s client timeout comfortably covers the 5 s upstream
+  GET plus spawn.
+- `POST /api/screen/mtv/stop` is deleted as a dead endpoint: nothing in the
+  UI calls it (stop already goes through `POST /api/screen/stop`, which quits
+  mpv, restarts the idle kiosk and re-claims the Pi input — verified).
 - `GET /api/screen/status` keeps `mtv: bool(MTV_URL)`.
-- Now-playing tile: no change needed — it already renders screen-player's
-  `title` / `subtitle` for other sources; the MTV button's stop handler is
-  repointed.
+- Phone UI (`static/index.html`): the now-playing render branches on
+  `profile === 'live'` vs everything-else-is-library, so `profile: "mtv"`
+  would light up the Library tab, pop the file browser and show the media
+  transport (seek, CC, next episode). Add an `mtv` branch: highlight the MTV
+  button in the Watch panel, `showTransport('live')` (stop only), no library
+  panel. Title/subtitle already render from the status fields.
 
 ### 4. Cleanup
 
 - Delete `screen/mtv-screen.service`, `screen/mtv-kiosk.sh`.
 - Remove `mtv-screen.service` from the `Conflicts=` lines in
   `aerial-screen.service` and `kiosk-screen.service`.
-- `screen/install-services.sh`: drop `mtv-screen` from its unit list if
-  enumerated there.
+- `screen/install-services.sh`: remove `mtv-screen` from its unit list and
+  the header comment describing it.
+- Hub `main.py` and `screen_player.py` docstrings that mention `/kiosk/mtv`
+  or `mtv-screen` are updated.
 - Deploy on the Pi: `systemctl stop mtv-screen; systemctl disable mtv-screen`
   (if enabled), remove the installed unit file, `daemon-reload`, reinstall
   the two idle units, restart `screen-player` when idle.
@@ -142,17 +205,25 @@ settle delay applies.
   screen-player + rebuild hub; verify = `/status` shows `source: "mtv"`).
 - README / ARCHITECTURE / ROADMAP / HOWTO updated: Phase 8 note replaced
   by the new behaviour; the "Known issues" block added on 2026-09-19 moves
-  to History.
+  to History. The mini-stream spec's plan to port the schedule math into
+  `hub/app/mtv_schedule.py` is marked superseded in ROADMAP: clients ask
+  the site over HTTP instead.
 
 ### 5. Testing
 
 - Unit (offline, existing screen-player test style): fake `/admin/api/now`
-  server; assert spawn args contain `--start=<offset>` and the right mp4 URL;
-  assert the conductor issues `loadfile … append` for `next`; assert a
-  simulated file change whose id differs from `now.id` triggers the corrective
-  `loadfile … replace`; assert `/status` reports `source: "mtv"` with
-  title/subtitle.
+  server and a fake mpv IPC socket that records commands and can emit
+  property-change events. Assert: spawn args carry `--idle=yes` and no file;
+  the conductor's first two commands are `loadfile now replace -1
+  start=<offset>` and `loadfile next append -1 start=0`; a `playlist-pos`
+  event with `path` equal to `now.id` appends the new next with `start=0`
+  and no replace; an event with a different `path` (or `time-pos` off by
+  more than 2 s) issues the corrective replace; `mtv_now` failure leaves the
+  queue untouched and logs once; `/status` reports `source: "mtv"` with
+  title/subtitle; `/play` 502s with `mtv:` prefix when the endpoint is down.
 - Unit (mtv repo): the JS-vs-Python schedule parity test in §1.
+- Plan ordering: the mtv-repo endpoint ships and is deployed first; the
+  screen-player tests stub it and never depend on the live site.
 - Manual acceptance on the Pi, nobody watching:
   1. Tap MTV on the phone → TV shows the video within ~5 s, **with sound**.
   2. Credits readable from the couch at 3840x2160; appear at song start and
