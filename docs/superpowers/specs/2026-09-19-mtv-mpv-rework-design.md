@@ -1,6 +1,10 @@
 # MTV on the TV via mpv — design
 
-Date: 2026-09-19. Status: **approved design, no code written**.
+Date: 2026-09-19. Status: **approved design; smarthome-side implementation in
+progress in a separate session (uncommitted in the working tree as of the
+evening of 2026-09-19). The mtv-repo endpoint (§1) is not started.** This
+spec is the source of truth; where the working tree and this text disagree,
+the text was updated after the third review to match the better choice.
 
 Replaces the cage + chromium kiosk that Phase 8 shipped for the MTV button
 with playback through mpv on DRM, the same path the jetstream livestream uses.
@@ -36,8 +40,13 @@ NOW PLAYING panel.
 
 ### 1. MTV site: `GET /admin/api/now?ch=<num>` (repo `alex/mtv`)
 
-Added to `admin/main.py` (FastAPI). Reads `/videos/manifest.json` and
-`/config/channels.json`, ports the schedule math to Python, returns:
+Added to `admin/main.py` (FastAPI). Reads `/videos/manifest.json` (the
+library, plus the optional `channels` map of channel number → id list) and
+`/config/channels.json` (the lineup: which channel numbers exist). Channel
+**membership** comes from `manifest.channels[str(num)]` when that map is
+present and from the whole library when it is absent; `channels.json` only
+says which numbers are valid. Items with `duration <= 0` are excluded before
+sorting. Ports the schedule math to Python and returns:
 
 ```json
 {
@@ -102,8 +111,10 @@ dashboard mini-stream spec will call it too.
 
 1. `now = mtv_now(base, channel)`. On `MtvUnavailable` → the caller decides
    (see below); nothing is spawned.
-2. Stash `_mtv = {"base": base, "channel": channel, "offset": now.offset,
-   "next": now.next}` for the conductor (`_stop()` clears it), then call the
+2. Stash `_mtv = {"base": base, "channel": channel, "schedule": <the whole
+   /admin/api/now response>}` for the conductor (`_stop()` clears it) — the
+   conductor builds both the `now` and `next` URLs from `schedule` and
+   `url_base`, so nothing else needs to carry ids. Then call the
    existing `_play(url={base}{url_base}{now.id}.mp4, headers=None,
    audio_only=False, profile="mtv", supervise=True, mode=DRM_MODE,
    title=now.artist, subtitle=now.song, source="mtv")`. Reusing `_play`
@@ -141,12 +152,17 @@ request/reply and stays that way for `/control` and `/status`). Interface:
   `observe_property 1 time-pos` and `observe_property 2 idle-active`, read
   newline-delimited JSON forever. Replies to its own commands are matched by
   `request_id`; the `file-loaded` event and the two property changes drive
-  the state machine below. Socket loss → thread exits; the supervisor's
-  respawn creates a new conductor.
+  the state machine below. **Conductor exit while mpv is still alive**
+  (connect failed after 5 s, reader error, socket closed) → the conductor
+  terminates its mpv, because an idle mpv with no conductor never advances
+  and the supervisor only watches process death. The supervisor then
+  respawns via `_play_mtv`, which creates a new conductor.
 - `command(list) -> reply`: send on the same socket with a fresh
-  `request_id`, block for the reply; a lock serialises writes, the reader
-  thread routes replies. Commands used: `loadfile`, `show-text`,
-  `get_property path`.
+  `request_id`, block for the reply (5 s); a lock serialises writes, the
+  reader thread routes replies. Commands used: `loadfile`, `show-text`,
+  `get_property path`, `get_property time-pos`.
+- Writes to `_url`, `_title`, `_subtitle`, `_mtv` take `_lock` like the rest
+  of the module, and only while this conductor's `proc` is still `_proc`.
 
 State machine (a "song" is identified by the id parsed from mpv's `path`,
 which is the full mp4 URL; the conductor builds the expected URL from
@@ -166,11 +182,21 @@ which is the full mp4 URL; the conductor builds the expected URL from
    passes. To rule out a replace loop on a persistently disagreeing
    server, at most one corrective replace per `file-loaded`; a second
    mismatch in a row is logged and left alone until the next natural
-   boundary.
+   boundary. Known degrade: a `now` file that fails to open (404 on the
+   mirror) never fires `file-loaded`; mpv plays `next` from 0, the check
+   fails, the one corrective replace fails the same way, and `next` plays
+   through with a log line. Acceptable, not a bug. If the drift check flaps
+   on the Pi because `file-loaded` precedes the per-file `start` seek, key
+   this step off `playback-restart` instead (fires after that seek); the
+   HTTP round-trip before the `time-pos` read is expected to mask it.
 3. `mtv_now` failure in step 2: keep playing what is queued (mpv already has
    `next`), log once per failure streak, retry at the next `file-loaded`.
    `idle-active` becoming true (playlist ran dry because `next` was never
    appended) → retry `mtv_now` every 5 s until it answers, then step 1.
+   **Ignore `idle-active` until after the first `file-loaded`**: with
+   `--idle=yes` the observe registration delivers an initial `true` before
+   the first `loadfile` has taken effect, and acting on it would double-load
+   the first song at every spawn.
 4. Credits: `show-text "{artist}\n{song}" 8000` in step 2; end credits fire
    once per song when `duration − time-pos ≤ 10` seen on the `time-pos`
    property stream (mpv throttles it to a few per second). Pause via
@@ -180,8 +206,8 @@ which is the full mp4 URL; the conductor builds the expected URL from
 settle delay call `_play_mtv(_mtv.base, _mtv.channel)` instead of
 re-spawning `_url`, so a crash rejoins the broadcast. If that raises
 `MtvUnavailable`, retry on each supervisor tick (3 s) for up to 60 s, then
-give up: `_stop()` and `_kiosk("start")` (dashboard back, same as a movie
-ending) and log the reason. The `live`-only decode-corruption and
+give up: `_stop()` (which already restarts the idle kiosk — dashboard back,
+same as a movie ending) and log the reason. The `live`-only decode-corruption and
 video-freeze watchdogs do **not** apply to `mtv` (no HLS discontinuities);
 stated here so the omission is deliberate.
 
@@ -237,12 +263,16 @@ the kiosk swap go too.
   server and a fake mpv IPC socket that records commands and can emit
   property-change events. Assert: spawn args carry `--idle=yes` and no file;
   the conductor's first two commands are `loadfile now replace -1
-  start=<offset>` and `loadfile next append -1 start=0`; a `playlist-pos`
-  event with `path` equal to `now.id` appends the new next with `start=0`
-  and no replace; an event with a different `path` (or `time-pos` off by
-  more than 2 s) issues the corrective replace; `mtv_now` failure leaves the
-  queue untouched and logs once; `/status` reports `source: "mtv"` with
-  title/subtitle; `/play` 502s with `mtv:` prefix when the endpoint is down.
+  start=<offset>` and `loadfile next append -1 start=0`; a `file-loaded`
+  event while `path` equals `now`'s full URL and `time-pos` is within 2 s
+  of `offset` appends the new next with `start=0` and no replace; a
+  `file-loaded` with a different `path` (or `time-pos` off by more than 2 s)
+  issues exactly one corrective replace, and a second consecutive mismatch
+  issues none; the initial `idle-active: true` before any `file-loaded` does
+  not trigger a reload; `mtv_now` failure leaves the queue untouched and
+  logs once; the conductor terminates mpv if the IPC socket closes while
+  mpv is alive; `/status` reports `source: "mtv"` with title/subtitle;
+  `/play` 502s with `mtv:` prefix when the endpoint is down.
 - Unit (mtv repo): the JS-vs-Python schedule parity test in §1.
 - Plan ordering: the mtv-repo endpoint ships and is deployed first; the
   screen-player tests stub it and never depend on the live site.
