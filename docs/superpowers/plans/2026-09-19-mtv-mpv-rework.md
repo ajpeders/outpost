@@ -378,11 +378,18 @@ if __name__ == "__main__":
     unittest.main()
 ```
 
-Dev-box prerequisite: `python3 -c "import fastapi, httpx"`; if missing, `pip install --user fastapi==0.115.12 httpx` (TestClient needs httpx). CI installs the same (Task 4).
+Prerequisite (neither `alex` nor `agent` has fastapi installed; Arch blocks system pip): a throwaway venv in the repo, ignored by git.
+
+```bash
+cd /home/agent/projects/mtv && python3 -m venv .venv && .venv/bin/pip install --quiet fastapi==0.115.12 httpx
+grep -q '^.venv/' .gitignore || echo '.venv/' >> .gitignore
+```
+
+Run the admin tests with `.venv/bin/python3` from here on (Task 1's parity test needs only stdlib + node and works with either). CI installs the same two packages (Task 4).
 
 - [ ] **Step 2: Run to verify it fails**
 
-Run: `cd /home/agent/projects/mtv/admin && python3 test_now.py -v`
+Run: `cd /home/agent/projects/mtv/admin && ../.venv/bin/python3 test_now.py -v`
 Expected: every test fails with status 404 from FastAPI's default "Not Found" (route missing) — `test_unknown_channel_404` may pass by accident; that's fine.
 
 - [ ] **Step 3: Implement the endpoint**
@@ -428,7 +435,7 @@ def now_playing(ch: int = 1):
 
 - [ ] **Step 4: Run both test files**
 
-Run: `cd /home/agent/projects/mtv/admin && python3 test_now.py -v && python3 test_schedule.py -v`
+Run: `cd /home/agent/projects/mtv/admin && ../.venv/bin/python3 test_now.py -v && python3 test_schedule.py -v`
 Expected: `OK` twice.
 
 - [ ] **Step 5: Ship `schedule.py` in the image**
@@ -439,7 +446,7 @@ Expected: `OK` twice.
 
 ```bash
 cd /home/agent/projects/mtv
-git add admin/main.py admin/Dockerfile admin/test_now.py
+git add admin/main.py admin/Dockerfile admin/test_now.py .gitignore
 git commit -m "admin: GET /admin/api/now — what a channel is airing right now
 
 Single source of truth the Pi's mpv player asks instead of rendering the
@@ -600,58 +607,77 @@ Anything unticked (other than the idle gate) becomes an extra step in Task 6 wit
 - Modify: `screen/screen_player.py` (`MtvConductor.__init__`, `run`)
 - Test: `tests/test_screen_player_mtv.py`
 
-- [ ] **Step 1: Write the failing test**
+The existing tests (`tests/test_screen_player_mtv.py`) drive `MtvConductor` directly: set the module globals (`player._proc`, `_profile="mtv"`, `_stopped=False`), build a conductor with `{"base", "channel", "schedule": SCHEDULE}`, monkeypatch `conductor.command` to record commands, and `patch.object(player, "mtv_now", …)`. Follow that pattern. The idle logic currently lives inline in `run()`'s loop, which cannot be unit-tested without a socket — so first extract it into a method.
 
-Look at how `tests/test_screen_player_mtv.py` fakes the IPC socket (it has a fake mpv server that records commands and can emit events; reuse its helpers — do not add a second fake). Add:
+- [ ] **Step 1: Extract the event handler (behaviour-preserving refactor)**
+
+In `MtvConductor`, move the body of the `run()` loop's event dispatch into a method and call it from the loop:
 
 ```python
-    def test_initial_idle_active_does_not_reload(self):
-        """observe_property idle-active delivers an initial `true` under
-        --idle=yes before the first loadfile lands; that must not trigger the
-        run-dry recovery (which would double-load the first song)."""
-        with self.fake_mpv() as mpv, self.fake_site() as site:
-            self.start_conductor(mpv, site)
-            mpv.emit({"event": "property-change", "id": 2, "name": "idle-active", "data": True})
-            time.sleep(0.3)
-            loads = [c for c in mpv.commands if c[0] == "loadfile"]
-            self.assertEqual(len(loads), 2, loads)          # initial replace + append only
-            self.assertEqual(site.calls, 1)                 # no extra /admin/api/now
-            mpv.emit({"event": "file-loaded"})
-            time.sleep(0.3)
-            mpv.emit({"event": "property-change", "id": 2, "name": "idle-active", "data": True})
-            time.sleep(0.3)
-            self.assertGreaterEqual(site.calls, 3)          # refresh + idle recovery now allowed
+    def _handle_event(self, event: dict) -> None:
+        if event.get("event") == "file-loaded":
+            self.idle = False
+            self._refresh()
+        elif event.get("event") == "property-change":
+            if event.get("name") == "idle-active":
+                self.idle = bool(event.get("data"))
+            elif (event.get("name") == "time-pos" and self.current_duration
+                  and not self.end_credits_shown and event.get("data") is not None
+                  and self.current_duration - float(event["data"]) <= 10):
+                if self.current_credits:
+                    self.command(["show-text", self.current_credits, 8000])
+                self.end_credits_shown = True
 ```
 
-Adapt the helper names (`fake_mpv`, `fake_site`, `start_conductor`, `commands`, `calls`, `emit`) to what the file actually provides.
+and in `run()` replace the `if event and … elif event and …` block with `if event: self._handle_event(event)`. Run the suite: `python3 -m unittest discover -s tests -p 'test_*.py' 2>&1 | tail -3` → still `OK`.
 
-- [ ] **Step 2: Run to verify it fails**
+- [ ] **Step 2: Write the failing test**
+
+```python
+    def test_initial_idle_active_is_ignored_until_first_file_loaded(self):
+        """--idle=yes reports idle-active=true at observe time, before the
+        first loadfile lands; acting on it would double-load the first song."""
+        proc = object()
+        player._proc = proc
+        player._profile = "mtv"
+        player._stopped = False
+        conductor = player.MtvConductor(proc, {"base": self.base, "channel": 1, "schedule": SCHEDULE})
+        conductor.command = lambda value: {"error": "success", "data": None}
+        conductor._handle_event({"event": "property-change", "id": 2, "name": "idle-active", "data": True})
+        self.assertFalse(conductor.idle)
+        with patch.object(player, "mtv_now", side_effect=player.MtvUnavailable("skip refresh")), \
+                patch.object(player, "_log_event"):
+            conductor._handle_event({"event": "file-loaded"})
+        conductor._handle_event({"event": "property-change", "id": 2, "name": "idle-active", "data": True})
+        self.assertTrue(conductor.idle)
+```
+
+- [ ] **Step 3: Run to verify it fails**
 
 Run: `python3 -m unittest tests.test_screen_player_mtv -k initial_idle -v`
-Expected: FAIL — `loads` has 4 entries or `site.calls == 2`.
+Expected: FAIL on the first `assertFalse` (`True is not false`).
 
-- [ ] **Step 3: Implement the gate**
+- [ ] **Step 4: Implement the gate**
 
-In `MtvConductor.__init__` add `self.seen_file_loaded = False`. In `run()`:
+`__init__`: add `self.seen_file_loaded = False`. In `_handle_event`:
 
 ```python
-            if event and event.get("event") == "file-loaded":
-                self.seen_file_loaded = True
-                self.idle = False
-                self._refresh()
-            elif event and event.get("event") == "property-change":
-                if event.get("name") == "idle-active":
-                    # --idle=yes reports idle once at observe time, before our
-                    # first loadfile lands; only a *later* idle means run-dry
-                    self.idle = bool(event.get("data")) and self.seen_file_loaded
+        if event.get("event") == "file-loaded":
+            self.seen_file_loaded = True
+            self.idle = False
+            self._refresh()
+        elif event.get("event") == "property-change":
+            if event.get("name") == "idle-active":
+                # only an idle seen *after* a song has loaded means run-dry
+                self.idle = bool(event.get("data")) and self.seen_file_loaded
 ```
 
-- [ ] **Step 4: Run the whole suite**
+- [ ] **Step 5: Run the whole suite**
 
 Run: `python3 -m unittest discover -s tests -p 'test_*.py' -v 2>&1 | tail -15`
 Expected: all pass.
 
-- [ ] **Step 5: Commit the implementation (everything in the working tree)**
+- [ ] **Step 6: Commit the implementation (everything in the working tree)**
 
 This commits the other session's work plus the fix; review the diff once more, then:
 
