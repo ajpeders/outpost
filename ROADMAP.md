@@ -172,6 +172,30 @@ the TV set (CEC), hosts the hub app, and runs scheduled automations.
   hardware-decode path, scale OSD credits for the 4K framebuffer, and measure
   frame drops, CPU/GPU load, thermals, and song-boundary behavior. Keep 1080p
   as the fallback if native 4K cannot play cleanly.
+- **MTV cache sizing:** observed a brief remote-MP4 buffering event on
+  2026-09-19 where the 4-second cache underran, the cache refilled, and
+  playback recovered without a restart. Investigate raising the `mtv`
+  profile's cache and `demuxer-readahead-secs` to 20–30 seconds and verify
+  this stays below the live HLS path's behaviour, then validate on a long
+  song-boundary through one full track.
+- **MTV persistent on-screen credits:** today's `show-text` call from the
+  `MtvConductor` displays artist/song for 8 seconds at song start and once
+  near the end. Users want the credits to stay on screen for the entire
+  track. Replace the timed fade with a persistent, low-contrast OSD that
+  re-asserts on every schedule refresh, hides gracefully on stop, and
+  remains readable from the couch on the 4K framebuffer (font size, margin,
+  outline sized for 1920x1080 today; review for 2160p later). Verify that
+  the persistent OSD does not conflict with mpv's normal status line and
+  that the conductor's IPC activity stays cheap enough for long tracks.
+- **TV sleep while streaming:** the CEC `tv-keepalive` unit only acts when
+  the Apple TV sleeps, not during Pi-side playback; the TV appears to drop
+  to standby during a long MTV/jetstream session anyway. Verify on the Pi
+  whether the TV's CEC wakeup is being driven (keepalive running, ATV
+  asleep, recent `tv-reclaim.sh` calls), and decide whether playback should
+  re-assert Pi active-source or call `image-view-on` while mpv is on. Likely
+  fix: a small “active playback” extension to `tv-keepalive.py` that holds
+  the TV on whenever `screen_player` reports `playing: true`, regardless of
+  ATV state.
 
 ## UI overhaul (2026-07-20) ✅ *(built + deployed)*
 
