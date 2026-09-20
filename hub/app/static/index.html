@@ -870,15 +870,15 @@ function fmtT(s) {
   const p = n => String(n).padStart(2, '0');
   return h ? (h + ':' + p(m) + ':' + p(ss)) : (m + ':' + p(ss));
 }
-function showTransport(kind) {  // '', 'media', 'live', 'queue'
-  const media = kind === 'media', live = kind === 'live', queue = kind === 'queue';
+function showTransport(kind) {  // '', 'media', 'live', 'mtv', 'queue'
+  const media = kind === 'media', live = kind === 'live', mtv = kind === 'mtv', queue = kind === 'queue';
   $('#np-progress').classList.toggle('hidden', !media);
   $('#np-times').classList.toggle('hidden', !media);
   $('#transport').classList.toggle('hidden', !media);          // seek + pause: media only
-  $('#transport2').classList.toggle('hidden', !(media || live)); // stop row: any playback
+  $('#transport2').classList.toggle('hidden', !(media || live || mtv)); // stop row: any playback
   $('#queue-row').classList.toggle('hidden', !queue);          // plex queue controls
   $('#media-nav').classList.toggle('hidden', !media);          // chapters + next episode
-  $('#np-volume').classList.toggle('hidden', !(media || live)); // mpv volume: any Pi playback
+  $('#np-volume').classList.toggle('hidden', !(media || live || mtv)); // mpv volume: any Pi playback
   $('#np-cc').classList.toggle('hidden', !media);              // subtitles: media only
   $('#np-audio').classList.toggle('hidden', !media);           // audio track: media only
   // Skip only renders while live AND the hub is wired for it. showTransport runs
@@ -1287,8 +1287,16 @@ async function refreshState() {
     setArtwork('');
     paintVolume(sd.volume, sd.muted);
     const u = decodeURIComponent(sd.url);
+    const isMtv = sd.profile === 'mtv';
     const isLive = sd.profile === 'live' || /\.m3u8/i.test(u);
-    if (isLive) {
+    if (isMtv) {
+      setWatchActive('mtv');
+      autoLibrary(false);
+      $('#np-eyebrow').innerHTML = '<span class="live-badge">MTV</span>';
+      $('#np-title').textContent = sd.title || 'MTV';
+      $('#np-sub').textContent = sd.subtitle || 'On the TV (Pi)';
+      showTransport('mtv');
+    } else if (isLive) {
       setWatchActive('livestream');
       autoLibrary(false);
       $('#np-eyebrow').innerHTML = '<span class="live-badge">Live</span>';

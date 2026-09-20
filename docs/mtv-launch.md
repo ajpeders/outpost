@@ -1,121 +1,116 @@
-# MTV on the TV — deploy & operate
+# MTV on the TV - deploy and operate
 
-Adds an **MTV** button to the hub's *Watch on the TV* panel. Tapping it makes the
-Pi display `MTV_URL` (default `https://mtv.thelunadog.com`) fullscreen on the
-TV's HDMI; tapping stop returns to the idle dashboard.
+The hub's **MTV** button plays the synchronized MTV broadcast through mpv on
+the Pi's HDMI. The TV gets direct video and audio; Chromium is not involved.
 
 ## How it works
 
-MTV is a **website**, not a video file, so it does **not** go through mpv. The
-hub instead swaps which systemd unit holds DRM master:
+MTV is a deterministic wall-clock broadcast. The site remains the schedule
+authority:
 
-| Unit | What it puts on the HDMI |
-|---|---|
-| `aerial-screen` | idle dashboard (mpv aerials + overlay) — the usual resting state |
-| `kiosk-screen` | idle dashboard (cage + chromium variant) |
-| `mtv-screen` | cage + chromium kiosk pointed at `MTV_URL` |
-
-Only one can be active at a time — all three `Conflicts=` each other, so systemd
-refuses to start two even if something tries.
-
-Flow:
-
-```
-hub UI  --POST /api/screen/mtv-->  hub
-                                   |-- wakes TV, claims Pi input (CEC)
-                                   '-- POST screen-player /kiosk/mtv
-                                        |-- systemctl stop  $SCREEN_KIOSK_SERVICE
-                                        '-- systemctl start mtv-screen
+```text
+hub UI -> POST /api/screen/mtv -> hub wakes TV and claims Pi input
+                                -> screen-player POST /play source=mtv
+                                -> GET MTV_URL/admin/api/now?ch=1
+                                -> mpv loads current MP4 at returned offset
+                                   and queues the next MP4
 ```
 
-`/api/screen/mtv/stop` does the reverse (`/kiosk/idle`).
+At each song boundary, screen-player rechecks the endpoint, corrects drift over
+two seconds, refreshes the queued successor, and displays artist/song credits.
+If the endpoint briefly fails, the queued song continues. If mpv dies, the
+supervisor rejoins the current wall-clock position; after 60 seconds without a
+schedule response it restores the idle dashboard.
 
-`$SCREEN_KIOSK_SERVICE` is whatever the idle kiosk is on that Pi — this box uses
-`aerial-screen` via a drop-in (`screen-player.service.d/kiosk-service.conf`).
+## Prerequisite
+
+The MTV service must deploy `GET /admin/api/now?ch=<number>` before this change.
+From the Pi, this must return JSON with `now`, `next`, and `url_base`:
+
+```sh
+curl -fsS 'https://mtv.thelunadog.com/admin/api/now?ch=1' | python3 -m json.tool
+```
+
+A 404 means the MTV service is not ready. Do not deploy/restart screen-player
+until that endpoint is available.
 
 ## Configuration
 
-`.env`:
+Set the site base URL in `.env`:
 
 ```sh
 MTV_URL=https://mtv.thelunadog.com
 ```
 
-Blank/absent → the hub reports `mtv: false` and the UI **hides the button**.
-`docker-compose.yml` passes it into the `hub` container; the `mtv-screen` unit
-reads the same `.env` via `EnvironmentFile=`.
+Blank or absent hides the button. `MTV_URL` is passed to the hub container; no
+host-unit environment variable is required.
 
-## Deploy (fresh Pi, or after a clone)
+## Deploy
+
+Check for another deployment session and active playback first. A
+screen-player restart kills the current mpv session.
 
 ```sh
-cd ~/projects/smarthome
+pgrep -af claude
+curl -s localhost:9595/status | python3 -m json.tool
+```
 
-# 1. config
-grep -q '^MTV_URL=' .env || echo 'MTV_URL=https://mtv.thelunadog.com' >> .env
+Proceed only when `playing` is false:
 
-# 2. install the unit (substitutes %%REPO%% for the real checkout path)
-sudo screen/install-services.sh mtv-screen
+```sh
+sudo systemctl stop mtv-screen 2>/dev/null || true
+sudo systemctl disable mtv-screen 2>/dev/null || true
+sudo rm -f /etc/systemd/system/mtv-screen.service
+sudo screen/install-services.sh screen-player aerial-screen kiosk-screen
+sudo systemctl daemon-reload
+sudo systemctl restart screen-player
 
-# 3. rebuild the hub so it serves the new endpoints
-DOCKER_BUILDKIT=0 docker compose build hub     # plain `build` fails: buildx too old on this Pi
+DOCKER_BUILDKIT=0 docker compose build hub
 docker compose up -d hub
 ```
 
-### Do NOT `systemctl enable mtv-screen`
-
-`enable` would start it at boot and the Pi would come up showing MTV instead of
-the dashboard. It is `disabled` on purpose — the hub starts it on demand.
-(`systemctl start` works regardless of enable state.)
-
-If you changed `aerial-screen.service` / `kiosk-screen.service` (the `Conflicts=`
-lines), reinstall those too and `daemon-reload` — safe while they run, since
-reload does not restart anything:
-
-```sh
-sudo screen/install-services.sh aerial-screen kiosk-screen
-```
+Changes under `hub/app/static/` are bind-mounted and become live without a
+rebuild, but the Python hub change requires the rebuild above.
 
 ## Verify
 
 ```sh
-# capability flag (true → UI shows the button)
-curl -s localhost:8080/api/screen/status | python3 -m json.tool | grep mtv
+# Button capability and idle status
+curl -s localhost:8080/api/screen/status | python3 -m json.tool
 
-# launch — expect {"ok":true,...} then aerial-screen inactive / mtv-screen active
-curl -sX POST localhost:8080/api/screen/mtv
-systemctl is-active aerial-screen mtv-screen
+# Launch; expect title and subtitle from the schedule endpoint
+curl -sX POST localhost:8080/api/screen/mtv | python3 -m json.tool
 
-# the page actually loaded:
-sudo tr '\0' ' ' < /proc/$(pgrep -f 'chromium --kiosk' | head -1)/cmdline | tr ' ' '\n' | grep thelunadog
+# Expect profile/source mtv and the current MP4 URL
+curl -s localhost:9595/status | python3 -m json.tool
 
-# stop — back to the dashboard
-curl -sX POST localhost:8080/api/screen/mtv/stop
-systemctl is-active aerial-screen mtv-screen
+# Inspect conductor/supervisor decisions and mpv output
+journalctl -u screen-player | grep 'screen:'
+sudo tail -f /tmp/screen-mpv.log
+
+# Normal stop returns to the dashboard
+curl -sX POST localhost:8080/api/screen/stop
 ```
+
+Manual acceptance: confirm sound, readable credits at song start and near its
+end, a clean song boundary, matching phone/site metadata, no dropped frames,
+and dashboard restoration after stop.
 
 ## Troubleshooting
 
-- **`{"ok":false,"error":"{\"error\": \"not found\"}"}`** — the hub reached
-  screen-player but it 404'd: the running `screen_player.py` predates the
-  checkout. `sudo systemctl restart screen-player`. (The hub is a container and
-  picks up changes on rebuild; screen-player is a host systemd unit and does
-  not.)
-- **`MTV_URL not configured` (503)** — `.env` has no `MTV_URL`, or the hub
-  container wasn't recreated after adding it (`docker compose up -d hub`).
-- **Button missing in the UI** — `mtv: false` from `/api/screen/status`, same
-  cause as above.
-- **TV stays on the dashboard after launch** — check `systemctl status
-  mtv-screen`; a `Conflicts=` violation or a cage/chromium crash shows there.
-  `mtv-kiosk.sh` waits up to 180 s for the hub's `/healthz` before starting
-  chromium.
-- **Both kiosks fighting over the display** — should be impossible via the
-  `Conflicts=` lines. If it happens, the installed units are stale: reinstall
-  them (`sudo screen/install-services.sh aerial-screen kiosk-screen mtv-screen`)
-  and `daemon-reload`.
+- **`mtv: HTTP Error 404`**: the MTV schedule endpoint is not deployed, or the
+  configured base URL is wrong.
+- **`MTV_URL not configured` (503)**: add it to `.env` and recreate the hub.
+- **Button missing**: `/api/screen/status` reports `mtv: false`; check the same
+  environment setting.
+- **Blank TV with `profile: mtv`**: inspect `/tmp/screen-mpv.log` and
+  `journalctl -u screen-player`. The conductor terminates an mpv whose IPC
+  socket disappears so the supervisor can rejoin it.
+- **Old `mtv-screen` unit still exists**: run the cleanup commands under
+  Deploy. It is obsolete and must remain stopped/disabled.
 
 ## Deploy etiquette
 
-Per `CLAUDE.md`: check `curl -s localhost:9595/status` before restarting
-`screen-player` — if `"playing": true`, someone is watching. Restarting the
-`hub` container is safe during playback (mpv runs on the host) but blips the
-phone UI for ~5 s.
+Never restart `screen-player` or `aerial-screen` while `/status` reports
+`"playing": true`. Restarting the hub is playback-safe but briefly interrupts
+the phone UI.

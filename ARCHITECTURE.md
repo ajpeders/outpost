@@ -84,7 +84,11 @@ senders on the same adapter can wedge the bus.
 
 **`screen_player`** (host) — spawns and supervises mpv, picks a DRM mode to match
 the content, exposes `/status`, `/play`, `/control`, `/stop`, and handles TV
-input reclaim. The supervisor relaunches mpv when playback wedges.
+input reclaim. The supervisor relaunches mpv when playback wedges. Its `mtv`
+profile asks the MTV site's local-only schedule API what is on now, starts that
+MP4 at the wall-clock offset, preloads the next item, and rechecks the schedule
+at each boundary. A persistent mpv IPC conductor updates credits and corrects
+drift without putting Chromium in the video path.
 
 **Media library** — `file`/`shuffle` playback and the media browser read a
 read-only CIFS/SMB share mounted on the host at `/mnt/share` (`SCREEN_MEDIA_ROOT`
@@ -146,6 +150,8 @@ removed.
 - **mpv on DRM rather than `<video>` in the browser.** cage/Chromium won't paint
   a video surface even with the GPU on — a Wayland limitation, not a GPU one.
   Hence video underneath and the dashboard composited on top as an overlay.
+  MTV uses the same path: the site remains the schedule authority, while mpv
+  directly plays its synchronized MP4 files with sound.
 - **One long-lived Chromium over CDP** for overlay renders (~0.8s warm) instead
   of cold-starting per minute (8–15s), with re-attach on session loss and a
   cold one-shot as the last resort.

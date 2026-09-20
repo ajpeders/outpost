@@ -3,7 +3,7 @@ Description=Living-room aerial screensaver (mpv aerials + dashboard overlay on t
 After=network-online.target docker.service screen-player.service
 Wants=network-online.target
 
-Conflicts=kiosk-screen.service mtv-screen.service
+Conflicts=kiosk-screen.service
 
 [Service]
 Type=simple

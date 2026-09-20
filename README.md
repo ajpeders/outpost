@@ -206,9 +206,8 @@ see.
 host-side player, dashboard, and their systemd units; `data/` is runtime state
 (gitignored).
 
-`docs/mtv-launch.md` covers putting the MTV web player on the TV (the kiosk
-swap between `aerial-screen` and `mtv-screen`) — deploy, config, and
-troubleshooting.
+`docs/mtv-launch.md` covers playing the synchronized MTV broadcast through mpv
+on the TV: prerequisites, deploy, verification, and troubleshooting.
 
 `ROADMAP.md` is the author's build log rather than user documentation, and
 `CLAUDE.md` is instructions for AI coding agents working in this repo — neither

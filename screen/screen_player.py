@@ -8,11 +8,9 @@ A supervisor thread keeps the current stream alive: if mpv dies while something
 should be playing (e.g. jetstream restarts its transcode when you skip media),
 it relaunches mpv so playback self-heals.
 
-  POST /play   {url, headers?:{...}, audio_only?:bool}  -> (re)start playback
+  POST /play   {url, source?:"mtv", channel?:int, ...}  -> (re)start playback
   POST /stop                                            -> stop playback
   POST /kiosk/restart                                   -> reload idle dashboard
-  POST /kiosk/mtv                                       -> swap idle kiosk -> MTV page
-  POST /kiosk/idle                                      -> swap MTV page -> idle kiosk
   POST /kiosk/cursor                                    -> reinstall transparent cursor
   GET  /status                                          -> {playing, url}
   GET  /kiosk/status                                    -> kiosk systemd state
@@ -30,19 +28,17 @@ import socket
 import subprocess
 import threading
 import time
+from queue import Empty, Queue
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import parse_qs, urlparse
+from urllib.error import HTTPError, URLError
+from urllib.parse import parse_qs, quote, urlencode, urljoin, urlparse
+from urllib.request import urlopen
 
 _HERE = osp.dirname(osp.abspath(__file__))
 IPC_SOCKET = os.environ.get("SCREEN_MPV_IPC", "/tmp/mpv-ipc")  # for sub toggle etc.
 # idle-dashboard kiosk service — stopped while mpv plays (both need DRM master),
 # restarted when playback ends.
 KIOSK_SERVICE = os.environ.get("SCREEN_KIOSK_SERVICE", "kiosk-screen")
-# MTV page kiosk service (cage + chromium on MTV_URL). Swapped in by the hub
-# when the user taps the MTV button; only ONE kiosk service can hold DRM
-# master at a time, so /api/screen/kiosk/mtv stops KIOSK_SERVICE and starts
-# MTV_KIOSK_SERVICE.
-MTV_KIOSK_SERVICE = os.environ.get("SCREEN_MTV_KIOSK_SERVICE", "mtv-screen")
 CURSOR_INSTALL = os.environ.get(
     "SCREEN_CURSOR_INSTALL", osp.join(_HERE, "install-cursor.sh"))
 # Reclaims the TV's HDMI input for the Pi (CEC active-source) — the Apple TV
@@ -73,56 +69,6 @@ def _kiosk_restart() -> dict:
                        capture_output=True, text=True, check=False)
     return {"ok": r.returncode == 0, "status": _kiosk_status(),
             "error": (r.stderr or r.stdout).strip()}
-
-
-def _unit_active(unit: str) -> bool:
-    """True if the given systemd unit is currently active (best-effort)."""
-    r = subprocess.run(["systemctl", "is-active", unit],
-                       capture_output=True, text=True, check=False)
-    return r.stdout.strip() == "active"
-
-
-def _swap_kiosk(target: str) -> dict:
-    """Swap which kiosk service holds DRM master. target = idle or mtv.
-
-    The two services cannot run simultaneously (both need cage/chromium DRM
-    master), so we stop the OTHER one first, then start the requested one.
-    Best-effort: failures return ok=False with the systemctl output so the
-    hub can surface them.
-    """
-    target = (target or "").strip().lower()
-    if target not in ("idle", "mtv"):
-        return {"ok": False, "error": "unknown kiosk target: " + repr(target)}
-    want = KIOSK_SERVICE if target == "idle" else MTV_KIOSK_SERVICE
-    other = MTV_KIOSK_SERVICE if target == "idle" else KIOSK_SERVICE
-    out = []
-
-    # Was the OTHER kiosk on screen before we touch anything? If the swap fails
-    # we put it back, otherwise the TV is left with no unit holding DRM master
-    # (blank HDMI) until something else starts one.
-    was_active = _unit_active(other)
-
-    r = subprocess.run(["systemctl", "stop", other], capture_output=True, text=True, check=False)
-    if r.returncode != 0:
-        msg = (r.stderr or r.stdout or "").strip()
-        if "inactive" not in msg.lower() and "not found" not in msg.lower():
-            out.append("stop " + other + ": " + msg)
-
-    r = subprocess.run(["systemctl", "start", want], capture_output=True, text=True, check=False)
-    if r.returncode != 0:
-        out.append("start " + want + ": " + (r.stderr or r.stdout or "").strip())
-        # Put the previous kiosk back so the TV isn't left blank.
-        restored = False
-        if was_active:
-            rb = subprocess.run(["systemctl", "start", other], capture_output=True, text=True, check=False)
-            restored = rb.returncode == 0
-            if not restored:
-                out.append("restore " + other + ": " + (rb.stderr or rb.stdout or "").strip())
-        return {"ok": False, "service": want, "active": "failed",
-                "restored": other if restored else None,
-                "error": "; ".join(out)}
-
-    return {"ok": True, "service": want, "active": "active", "logs": out}
 
 
 def _cursor_repair() -> dict:
@@ -257,6 +203,7 @@ _subtitle: str | None = None
 _supervise: bool = True         # auto-relaunch on death (live yes, media no)
 _stopped: bool = True           # True = intentionally stopped (won't relaunch)
 _mode: str = DRM_MODE           # DRM mode index for the current playback
+_mtv: dict | None = None         # base/channel and latest schedule response
 
 
 def _clean_text(value) -> str | None:
@@ -266,8 +213,8 @@ def _clean_text(value) -> str | None:
     return text
 
 
-def _build_args(url: str, headers: dict | None, audio_only: bool,
-                profile: str = "live", mode: str | None = None) -> list[str]:
+def _build_args(url: str | None, headers: dict | None, audio_only: bool,
+                 profile: str = "live", mode: str | None = None) -> list[str]:
     m = mode or DRM_MODE
     if profile == "media":
         # local files are often 4K HEVC. --vo=drm forces drm-copy (frames copied to
@@ -295,6 +242,13 @@ def _build_args(url: str, headers: dict | None, audio_only: bool,
                  f"--watch-later-dir={WATCH_LATER_DIR}",
                  "--write-filename-in-watch-later-config",
                  "--watch-later-options=start,sid"]
+    elif profile == "mtv":
+        video = ["--vo=drm", f"--drm-mode={m}", "--hwdec=no",
+                 "--cache=yes", "--cache-secs=4", "--demuxer-readahead-secs=4",
+                 "--sid=no", "--sub-auto=no", f"--input-ipc-server={IPC_SOCKET}",
+                 "--idle=yes", "--prefetch-playlist=yes",
+                 "--osd-font-size=42", "--osd-margin-x=56", "--osd-margin-y=46",
+                 "--osd-align-x=left", "--osd-align-y=bottom", "--osd-border-size=2"]
     else:
         # live HLS (H.264): plain drm VO — robust across the transcode restarts
         # jetstream does on skip (gpu-next "export fails" on relaunch). Pi 5 has
@@ -319,7 +273,8 @@ def _build_args(url: str, headers: dict | None, audio_only: bool,
         args.append("--no-video")
     if headers:
         args.append("--http-header-fields=" + ",".join(f"{k}: {v}" for k, v in headers.items()))
-    args.append(url)
+    if profile != "mtv" and url:
+        args.append(url)
     return args
 
 
@@ -351,12 +306,14 @@ def _spawn() -> None:
             break
         time.sleep(0.1)
     time.sleep(0.5)  # let the kernel release DRM master
-    logf = open(LOG_FILE, "w")  # fresh log per spawn, for diagnosis
-    _proc = subprocess.Popen(
-        _build_args(_url, _headers, _audio_only, _profile, _mode),
-        stdout=logf, stderr=subprocess.STDOUT,
-        stdin=subprocess.DEVNULL, start_new_session=True,
-    )
+    with open(LOG_FILE, "w") as logf:  # fresh log per spawn, for diagnosis
+        _proc = subprocess.Popen(
+            _build_args(_url, _headers, _audio_only, _profile, _mode),
+            stdout=logf, stderr=subprocess.STDOUT,
+            stdin=subprocess.DEVNULL, start_new_session=True,
+        )
+    if _profile == "mtv" and _mtv:
+        MtvConductor(_proc, dict(_mtv)).start()
 
 
 def _play(url: str, headers: dict | None = None, audio_only: bool = False,
@@ -374,9 +331,10 @@ def _play(url: str, headers: dict | None = None, audio_only: bool = False,
 
 
 def _stop() -> None:
-    global _url, _stopped, _proc, _title, _subtitle, _source
+    global _url, _stopped, _proc, _title, _subtitle, _source, _mtv
     with _lock:
         _stopped, _url, _title, _subtitle, _source = True, None, None, None, None
+        _mtv = None
         _quit_mpv()
         _proc = None
     _kiosk("start")  # back to the idle dashboard
@@ -609,6 +567,233 @@ def _ipc_prop(name: str):
     return None
 
 
+class MtvUnavailable(RuntimeError):
+    pass
+
+
+def _mtv_item_url(base: str, data: dict, item: dict) -> str:
+    return urljoin(base.rstrip("/") + "/", str(data.get("url_base", "/videos/"))) + \
+        quote(str(item["id"]), safe="") + ".mp4"
+
+
+def mtv_now(base: str, channel: int) -> dict:
+    """Return the MTV site's authoritative schedule response."""
+    url = base.rstrip("/") + "/admin/api/now?" + urlencode({"ch": channel})
+    try:
+        with urlopen(url, timeout=5) as response:
+            data = json.load(response)
+        now, nxt = data["now"], data["next"]
+        for item in (now, nxt):
+            if not isinstance(item, dict) or not item.get("id"):
+                raise ValueError("schedule item has no id")
+        now["offset"] = float(now["offset"])
+        now["duration"] = float(now["duration"])
+        return data
+    except HTTPError as exc:
+        exc.close()
+        raise MtvUnavailable(str(exc)) from exc
+    except (URLError, OSError, ValueError, KeyError, TypeError) as exc:
+        raise MtvUnavailable(str(exc)) from exc
+
+
+def _play_mtv(base: str, channel: int) -> dict:
+    global _mtv
+    data = mtv_now(base, channel)
+    now = data["now"]
+    url = _mtv_item_url(base, data, now)
+    with _lock:
+        _mtv = {"base": base.rstrip("/"), "channel": channel, "schedule": data}
+        _play(url, profile="mtv", supervise=True, mode=DRM_MODE,
+              title=_clean_text(now.get("artist")), subtitle=_clean_text(now.get("song")),
+              source="mtv")
+    return {"url": url, "title": _title, "subtitle": _subtitle}
+
+
+class MtvConductor(threading.Thread):
+    """Keep one idle mpv process joined to MTV's wall-clock schedule."""
+
+    def __init__(self, proc: subprocess.Popen, state: dict):
+        super().__init__(daemon=True, name="mtv-conductor")
+        self.proc = proc
+        self.state = state
+        self.sock: socket.socket | None = None
+        self.events: Queue = Queue()
+        self.pending: dict[int, Queue] = {}
+        self.write_lock = threading.Lock()
+        self.next_request = 1
+        self.closed = threading.Event()
+        self.idle = False
+        self.loaded = False
+        self.failure_logged = False
+        self.correction_pending = False
+        self.current_path: str | None = None
+        self.current_duration: float | None = None
+        self.current_credits: str | None = None
+        self.end_credits_shown = False
+
+    def _current(self) -> bool:
+        return _proc is self.proc and _profile == "mtv" and not _stopped
+
+    def _reader(self) -> None:
+        buf = b""
+        try:
+            while self._current() and not self.closed.is_set():
+                chunk = self.sock.recv(4096)
+                if not chunk:
+                    break
+                buf += chunk
+                while b"\n" in buf:
+                    line, buf = buf.split(b"\n", 1)
+                    try:
+                        obj = json.loads(line)
+                    except ValueError:
+                        continue
+                    request_id = obj.get("request_id")
+                    if request_id in self.pending:
+                        self.pending[request_id].put(obj)
+                    elif "event" in obj:
+                        self.events.put(obj)
+        except OSError:
+            pass
+        finally:
+            self.closed.set()
+            for reply in list(self.pending.values()):
+                reply.put(None)
+            # A live mpv with no conductor cannot advance or recover from idle.
+            # Ending only this process lets the supervisor rejoin the schedule.
+            if self._current() and self.proc.poll() is None:
+                self.proc.terminate()
+
+    def command(self, command: list) -> dict | None:
+        if self.closed.is_set() or not self.sock:
+            return None
+        with self.write_lock:
+            request_id = self.next_request
+            self.next_request += 1
+            reply: Queue = Queue()
+            self.pending[request_id] = reply
+            try:
+                self.sock.sendall((json.dumps({"command": command, "request_id": request_id}) + "\n").encode())
+                return reply.get(timeout=5)
+            except (OSError, Empty):
+                return None
+            finally:
+                self.pending.pop(request_id, None)
+
+    def _load_schedule(self, data: dict, replace: bool) -> None:
+        base = self.state["base"]
+        now_url = _mtv_item_url(base, data, data["now"])
+        next_url = _mtv_item_url(base, data, data["next"])
+        if replace:
+            self.command(["loadfile", now_url, "replace", -1,
+                          f"start={float(data['now']['offset'])}"])
+        self.command(["loadfile", next_url, "append", -1, "start=0"])
+
+    def _refresh(self) -> None:
+        global _url, _title, _subtitle, _mtv
+        path_reply = self.command(["get_property", "path"])
+        path = path_reply.get("data") if path_reply else None
+        try:
+            data = mtv_now(self.state["base"], self.state["channel"])
+        except MtvUnavailable as exc:
+            if not self.failure_logged:
+                _log_event(f"MTV schedule unavailable — keeping queue: {exc}")
+                self.failure_logged = True
+            return
+        self.failure_logged = False
+        pos_reply = self.command(["get_property", "time-pos"])
+        pos = pos_reply.get("data") if pos_reply else None
+        expected = _mtv_item_url(self.state["base"], data, data["now"])
+        matched = path == expected and pos is not None and abs(float(pos) - float(data["now"]["offset"])) <= 2
+        if not matched:
+            if self.correction_pending:
+                _log_event("MTV still differs after correction — waiting for next boundary")
+                self.correction_pending = False
+                return
+            self.correction_pending = True
+            self._load_schedule(data, replace=True)
+            return
+        self.correction_pending = False
+        # Keep the playing item, but replace its queued successor with the latest schedule.
+        self.command(["playlist-clear"])
+        self._load_schedule(data, replace=False)
+        now = data["now"]
+        artist, song = _clean_text(now.get("artist")), _clean_text(now.get("song"))
+        with _lock:
+            if self._current():
+                _url, _title, _subtitle = expected, artist, song
+                _mtv = {**self.state, "schedule": data}
+        self.current_path = expected
+        self.current_duration = float(now["duration"])
+        self.current_credits = "\n".join(v for v in (artist, song) if v)
+        self.end_credits_shown = False
+        if self.current_credits:
+            self.command(["show-text", self.current_credits, 8000])
+
+    def _connect(self) -> bool:
+        deadline = time.time() + 5
+        while self._current() and time.time() < deadline:
+            try:
+                self.sock = socket.socket(socket.AF_UNIX)
+                self.sock.connect(IPC_SOCKET)
+                return True
+            except OSError:
+                if self.sock:
+                    self.sock.close()
+                time.sleep(0.1)
+        return False
+
+    def _handle_event(self, event: dict) -> None:
+        if event.get("event") == "file-loaded":
+            self.loaded = True
+            self.idle = False
+            self._refresh()
+        elif event.get("event") == "property-change":
+            if event.get("name") == "idle-active":
+                # mpv starts idle before the conductor's first loadfile. Treating
+                # that initial state as a drained playlist issues duplicate loads.
+                if self.loaded:
+                    self.idle = bool(event.get("data"))
+            elif (event.get("name") == "time-pos" and self.current_duration
+                  and not self.end_credits_shown and event.get("data") is not None
+                  and self.current_duration - float(event["data"]) <= 10):
+                if self.current_credits:
+                    self.command(["show-text", self.current_credits, 8000])
+                self.end_credits_shown = True
+
+    def run(self) -> None:
+        if not self._connect():
+            _log_event("MTV conductor could not connect to mpv IPC")
+            if self._current() and self.proc.poll() is None:
+                self.proc.terminate()
+            return
+        if not self._current():
+            self.sock.close()
+            return
+        threading.Thread(target=self._reader, daemon=True, name="mtv-ipc-reader").start()
+        self.command(["observe_property", 1, "time-pos"])
+        self.command(["observe_property", 2, "idle-active"])
+        self._load_schedule(self.state["schedule"], replace=True)
+        next_idle_retry = 0.0
+        while self._current() and not self.closed.is_set():
+            try:
+                event = self.events.get(timeout=1)
+            except Empty:
+                event = None
+            if event:
+                self._handle_event(event)
+            if self.idle and time.time() >= next_idle_retry:
+                next_idle_retry = time.time() + 5
+                try:
+                    data = mtv_now(self.state["base"], self.state["channel"])
+                except MtvUnavailable:
+                    continue
+                self.state["schedule"] = data
+                self._load_schedule(data, replace=True)
+        if self.sock:
+            self.sock.close()
+
+
 def _sub_cycle() -> bool:
     """Cycle the subtitle track on the current media playback (off → 1 → 2 → off)."""
     return _ipc(["cycle", "sub"]) is not None
@@ -732,6 +917,7 @@ def _supervisor() -> None:
     last_video_pts = None
     video_stalls = 0
     budget_warned = False    # so an exhausted budget logs once, not every 3s
+    mtv_retry_since = 0.0
     while True:
         time.sleep(3)
         with _lock:
@@ -744,6 +930,7 @@ def _supervisor() -> None:
                 spawn_errors = 0
                 last_video_pts = None
                 video_stalls = 0
+                mtv_retry_since = 0.0
             if _alive():
                 dead_since = 0.0
                 if _profile == "live":
@@ -792,9 +979,23 @@ def _supervisor() -> None:
                 if dead_since == 0.0:
                     dead_since = time.time()
                 elif time.time() - dead_since >= 4:
-                    dead_since = 0.0
-                    _log_event("mpv exited — relaunching (jetstream run change?)")
-                    _spawn()                    # live: relaunch
+                    if _profile == "mtv" and _mtv:
+                        if mtv_retry_since == 0.0:
+                            mtv_retry_since = time.time()
+                        try:
+                            _log_event("mpv exited — rejoining MTV schedule")
+                            _play_mtv(_mtv["base"], _mtv["channel"])
+                            dead_since = 0.0
+                            mtv_retry_since = 0.0
+                        except (MtvUnavailable, OSError) as exc:
+                            _log_event(f"MTV rejoin failed: {exc}")
+                            if time.time() - mtv_retry_since >= 60:
+                                _log_event("MTV unavailable for 60s — back to the dashboard")
+                                _stop()
+                    else:
+                        dead_since = 0.0
+                        _log_event("mpv exited — relaunching (jetstream run change?)")
+                        _spawn()                # live: relaunch
             else:
                 _log_event("playback finished — back to the dashboard")
                 _stopped, _url, _title, _subtitle, _source = True, None, None, None, None
@@ -841,10 +1042,24 @@ class Handler(BaseHTTPRequestHandler):
             title = _clean_text(body.get("title"))
             subtitle = _clean_text(body.get("subtitle"))
             source = _clean_text(body.get("source"))
-            _play(url, body.get("headers"), bool(body.get("audio_only")),
-                  title=title, subtitle=subtitle, source=source)
-            self._send(200, {"playing": True, "url": url, "title": title,
-                             "subtitle": subtitle, "source": source})
+            if source == "mtv":
+                try:
+                    channel = int(body.get("channel", 1))
+                    result = _play_mtv(url, channel)
+                except (TypeError, ValueError):
+                    return self._send(422, {"error": "channel must be an integer"})
+                except MtvUnavailable as exc:
+                    return self._send(502, {"error": f"mtv: {exc}"})
+                except OSError as exc:
+                    _stop()
+                    return self._send(502, {"error": f"mtv: could not start mpv: {exc}"})
+                self._send(200, {"ok": True, "playing": True,
+                                 "profile": "mtv", "source": "mtv", **result})
+            else:
+                _play(url, body.get("headers"), bool(body.get("audio_only")),
+                      title=title, subtitle=subtitle, source=source)
+                self._send(200, {"playing": True, "url": url, "title": title,
+                                 "subtitle": subtitle, "source": source})
         elif self.path == "/media/play":
             rel = str(body.get("path", "")).strip()
             try:
@@ -870,14 +1085,6 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, {"ok": _sub_cycle()})
         elif self.path == "/kiosk/restart":
             result = _kiosk_restart()
-            self._send(200 if result["ok"] else 500, result)
-        elif self.path == "/kiosk/mtv":
-            # MTV swap-in: stop idle kiosk, start MTV kiosk. Called by hub /api/screen/mtv.
-            result = _swap_kiosk("mtv")
-            self._send(200 if result["ok"] else 500, result)
-        elif self.path == "/kiosk/idle":
-            # MTV swap-out: stop MTV kiosk, restart idle kiosk. Called by hub /api/screen/mtv/stop.
-            result = _swap_kiosk("idle")
             self._send(200 if result["ok"] else 500, result)
         elif self.path == "/kiosk/cursor":
             result = _cursor_repair()

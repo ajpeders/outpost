@@ -3,7 +3,7 @@ Description=Living-room idle dashboard (cage + chromium on the Pi HDMI)
 After=network-online.target docker.service screen-player.service
 Wants=network-online.target
 
-Conflicts=aerial-screen.service mtv-screen.service
+Conflicts=aerial-screen.service
 
 [Service]
 Type=simple

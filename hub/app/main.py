@@ -596,49 +596,36 @@ async def jetstream_stop():
 
 @app.post("/api/screen/mtv")
 async def screen_mtv():
-    """Swap the kiosk service to mtv-screen (cage + chromium on MTV_URL).
-
-    The MTV page is a website, not a video file, so mpv cannot render it -
-    we swap which systemd unit holds DRM master instead. mtv-screen runs
-    screen/mtv-kiosk.sh (parallel to screen/kiosk.sh, but pointed at MTV_URL).
-    Reuses _wake_tv_to_pi so the TV warms while the kiosk swap runs.
-    """
+    """Join MTV's deterministic broadcast through mpv on the Pi HDMI."""
     global _active_input
     if not MTV_URL:
         raise HTTPException(status_code=503, detail="MTV_URL not configured")
     wake = _wake_tv_to_pi()
     _active_input = "pi"
-    title = MTV_URL.split("://", 1)[-1].split("/", 1)[0] or "MTV"
     try:
-        r = await client.post(f"{SCREEN_URL}/kiosk/mtv", timeout=15.0)
+        r = await client.post(f"{SCREEN_URL}/play",
+                              json={"source": "mtv", "url": MTV_URL, "channel": 1},
+                              timeout=30.0)
     except httpx.RequestError as exc:
         await wake
         return JSONResponse(status_code=502, content={"ok": False, "error": f"screen player unreachable: {exc}"})
     await wake
     if not r.is_success:
-        return JSONResponse(status_code=r.status_code, content={"ok": False, "error": (r.text or "").strip() or "kiosk swap failed"})
-    return {"ok": True, "playing": "mtv", "target": "pi", "title": title, "url": MTV_URL}
-
-
-@app.post("/api/screen/mtv/stop")
-async def screen_mtv_stop():
-    """Swap the kiosk service back to kiosk-screen (idle dashboard).
-
-    No mpv was started for MTV (it's a webpage kiosk, not a video), so we
-    do not call /api/screen/stop. We still wake the TV and claim the Pi
-    input so the dashboard appears on the right HDMI even if the TV was off."""
-    global _active_input
-    _active_input = "pi"
-    wake = _wake_tv_to_pi()
+        try:
+            error = r.json().get("error")
+        except (ValueError, AttributeError):
+            error = None
+        return JSONResponse(status_code=r.status_code,
+                            content={"ok": False, "error": error or (r.text or "").strip() or "MTV unavailable"})
     try:
-        r = await client.post(f"{SCREEN_URL}/kiosk/idle", timeout=15.0)
-    except httpx.RequestError as exc:
-        await wake
-        return JSONResponse(status_code=502, content={"ok": False, "error": f"screen player unreachable: {exc}"})
-    await wake
-    if not r.is_success:
-        return JSONResponse(status_code=r.status_code, content={"ok": False, "error": (r.text or "").strip() or "kiosk swap-back failed"})
-    return {"ok": True}
+        data = r.json()
+        if not isinstance(data, dict):
+            raise ValueError("response is not an object")
+    except ValueError as exc:
+        return JSONResponse(status_code=502,
+                            content={"ok": False, "error": f"invalid screen player response: {exc}"})
+    return {"ok": True, "playing": "mtv", "target": "pi",
+            "title": data.get("title"), "subtitle": data.get("subtitle")}
 
 
 @app.get("/api/jetstream/capabilities")
