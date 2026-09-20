@@ -135,10 +135,31 @@ class ScreenPlayerMtvTests(unittest.TestCase):
                        "append", -1, "start=0"], commands)
         self.assertNotIn(["loadfile", self.base + "/videos/now-id.mp4",
                           "replace", -1, "start=12.5"], commands)
+        # Persistent credits: show-text with -1 (not the old 8-second fade).
+        self.assertIn(["show-text", player._credits_osd_text("Artist\nSong"), -1], commands)
         with patch.object(player, "_ipc_prop", return_value=None):
             status = player._status()
         self.assertEqual(status["source"], "mtv")
         self.assertEqual(status["title"], "Artist")
+
+    def test_conductor_clears_credits_on_idle(self):
+        proc = object()
+        player._proc = proc
+        player._profile = "mtv"
+        player._stopped = False
+        conductor = player.MtvConductor(proc, {
+            "base": self.base,
+            "channel": 1,
+            "schedule": SCHEDULE,
+        })
+        commands = []
+        conductor.command = lambda value: commands.append(value) or {"error": "success"}
+        conductor.loaded = True
+        conductor._handle_event({
+            "event": "property-change", "name": "idle-active", "data": True,
+        })
+        self.assertTrue(conductor.idle)
+        self.assertIn(["show-text", "", 1], commands)
 
     def test_conductor_corrects_wrong_item(self):
         proc = object()
