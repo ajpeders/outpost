@@ -206,6 +206,9 @@ see.
 host-side player, dashboard, and their systemd units; `data/` is runtime state
 (gitignored).
 
+`bin/deploy` is the on-Pi CD agent (systemd timer polls `origin/main` and
+redeploys with rollback + ntfy alerts) — see [HOWTO.md](HOWTO.md#update-and-redeploy).
+
 `docs/mtv-launch.md` covers playing the synchronized MTV broadcast through mpv
 on the TV: prerequisites, deploy, verification, and troubleshooting.
 

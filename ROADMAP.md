@@ -454,6 +454,9 @@ seconds) returned; that empty frame then sat on the TV for the 60s refresh.
 - `screen/` — mpv media player + cage kiosk service + cursor-hiding support +
   `dashboard.html`.
 - `test-client.py` — stdlib smoke-test client.
+- `bin/deploy` — on-Pi CD agent (2026-09-20): systemd timer polls `origin/main`,
+  redeploys host units + containers, health-checks, rolls back, alerts via ntfy.
+  Verified: `9f4cece` auto-deployed 02:08 MDT after deferring through a movie.
 
 ---
 

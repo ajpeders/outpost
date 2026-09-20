@@ -194,6 +194,30 @@ directory plus `.env`:
 | `data/screen/shuffle-history.json` | screen player | last-20 no-repeat list |
 | `${HUB_SSH_DIR}` → `/ssh` (read-only) | you | key + known_hosts for the homelab probe |
 
+## Deployment
+
+Continuous deployment is **pull-based, on the Pi** — no CI runner, no webhook,
+no homelab dependency (same constraint as everything else here).
+`smarthome-deploy.timer` runs `bin/deploy` every 3 min as `alex`:
+
+1. Skip if the checkout is dirty, off `main`, ahead of origin, or diverged.
+2. Fetch; compare `origin/main` to `state/deploy/smarthome.deployed` (a stamp,
+   not `HEAD` — commits pushed *from* the Pi leave HEAD == origin while the
+   running containers are stale).
+3. Defer if mpv is playing (`GUARD_CMD`), per the CLAUDE.md etiquette.
+4. Fast-forward, then `DEPLOY_CMD`: reinstall + restart the host screen units
+   (they run `screen/*.py` straight from the checkout, so a pull alone doesn't
+   land those changes), then `docker compose up -d --build --force-recreate`
+   (BuildKit off; `--force-recreate` because single-file bind mounts pin the old
+   inode).
+5. `HEALTH_CMD` (containers running with 0 restarts, `screen-player` active,
+   the three HTTP endpoints answer), retried 4×10 s. On failure: reset to the
+   previous sha, redeploy it, record the bad sha so it isn't retried, alert.
+
+Decisions log to `state/deploy/deploy.log` (gitignored, one-deep rotation);
+build output to `state/deploy/smarthome.log`. `flock` serialises the timer
+against hand runs.
+
 ## Failure behaviour
 
 - Containers are `restart: unless-stopped`; host units are `Restart=always`.

@@ -202,6 +202,29 @@ curl -s 'localhost:8080/api/media/list?path='    # lists the library root
 
 ## Update and redeploy
 
+**Automatic (normal path).** Push to `main`; the Pi redeploys itself. A systemd
+timer (`smarthome-deploy.timer`, every 3 min) runs `bin/deploy`, which fetches
+`origin/main` and, if it advanced past the last deployed sha, fast-forwards,
+reinstalls + restarts the host screen units, rebuilds the containers, and
+health-checks. A failed build or health check rolls back to the previous commit.
+Every deploy or rollback posts to ntfy (`bin/ntfy-alert`, token in
+`~/.config/smarthome-deploy/.env`).
+
+```sh
+systemctl status smarthome-deploy.timer          # enabled + waiting
+tail ~/projects/smarthome/state/deploy/deploy.log # decisions per tick
+cat  ~/projects/smarthome/state/deploy/smarthome.deployed   # sha now running
+./bin/deploy                                     # run a tick by hand
+```
+
+It **defers** while mpv is playing (guard on `localhost:9595/status`), and
+**skips** if the checkout is dirty, not on `main`, ahead of origin, or diverged
+(diverged → one ntfy alert, then hands-off until you reconcile). A commit whose
+deploy failed is not retried until a new push lands. Config lives in
+`bin/deploy.d/smarthome.conf`; unit files are `/etc/systemd/system/smarthome-deploy.{service,timer}`.
+
+**Manual** (when the timer is stopped or you need it now):
+
 ```sh
 cd ~/projects/smarthome
 git pull
