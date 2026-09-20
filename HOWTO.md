@@ -34,6 +34,21 @@ cp .env.example .env && $EDITOR .env      # at minimum set ATV_ADDRESS
 docker compose up -d --build
 ```
 
+If `JETSTREAM_URL` points at a host that the homelab serves on the LAN (e.g.
+`live.thelunadog.com` → AdGuard rewrites it to isis), pin it in `/etc/hosts` so
+the Pi never depends on a resolver for it:
+
+```sh
+echo "192.168.0.176 live.thelunadog.com" | sudo tee -a /etc/hosts
+```
+
+Why: the Pi's `resolv.conf` lists the router and ISP resolvers after AdGuard.
+When AdGuard is slow (it happens — one lookup in ten hit glibc's 5 s timeout),
+glibc falls through to them, they return the public Cloudflare records, mpv
+reaches jetstream from the Pi's public address, and jetstream's LAN allowance
+no longer applies (`401` on every segment, mpv relaunch loop). The `hub`
+container uses host networking, so it inherits the pin.
+
 Verify:
 
 ```sh
@@ -122,6 +137,25 @@ sudo systemctl enable --now aerial-screen   # OR kiosk-screen — never both
   `sudo systemctl edit screen-player` → `Environment=SCREEN_MEDIA_ROOT=/path`.
 - If you use `aerial-screen`, set `SCREEN_KIOSK_SERVICE=aerial-screen` on
   `screen-player` so the mpv handoff stops the right unit.
+
+## Play MTV on the TV
+
+Set `MTV_URL=https://mtv.thelunadog.com` in `.env` and recreate the hub. The
+site must expose `GET /admin/api/now?ch=1` to the Pi; verify that before
+restarting the host player:
+
+```sh
+curl -fsS 'https://mtv.thelunadog.com/admin/api/now?ch=1' | python3 -m json.tool
+curl -s localhost:9595/status   # do not restart if playing is true
+sudo systemctl restart screen-player
+DOCKER_BUILDKIT=0 docker compose build hub
+docker compose up -d hub
+curl -sX POST localhost:8080/api/screen/mtv | python3 -m json.tool
+```
+
+MTV plays through mpv, not Chromium. Stop it with the normal screen stop action:
+`curl -sX POST localhost:8080/api/screen/stop`. See `docs/mtv-launch.md` for
+deployment cleanup and detailed verification.
 
 ## Mount the media library (SMB/CIFS)
 
@@ -224,6 +258,14 @@ Bravia Sync / SimpLink / …) and make sure the Pi is on an input the TV can see
 **Black screen or wrong refresh rate on the TV.** The DRM mode indices are
 specific to your display's mode list. List them with `modetest -c` (from
 `libdrm-tests`) and set `SCREEN_DRM_MODE` / `AERIAL_DRM_MODE` to match.
+
+**Livestream keeps relaunching (`mpv exited — relaunching` every ~10 s).** Two
+known causes. (1) jetstream stopped its transcode because it saw no viewers —
+fixed in jetstream on 2026-09-19 (LAN clients now count), so if it recurs check
+that fix is still deployed. (2) The Pi resolved `live.thelunadog.com` to the
+public Cloudflare address instead of isis and got `401` on `/hls/` — see the
+`/etc/hosts` pin in *Set up a fresh Pi*. Either way, `POST /api/screen/stop`
+on the hub brings the dashboard back immediately.
 
 **mpv IPC queries all return `None`.** The socket is root-owned — query it as
 root.

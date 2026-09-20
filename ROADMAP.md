@@ -145,39 +145,24 @@ the TV set (CEC), hosts the hub app, and runs scheduled automations.
   in hero/dashboard/resume rows, alarm rows no longer squish on narrow phones,
   idle hero copy, UI tested headless end-to-end (13 interactive checks).
 
-## Phase 8 — TV website launch (2026-09-18) ✅ *(built)*
+## Phase 8 — MTV on the TV (2026-09-19) ✅ *(built, awaiting endpoint deploy)*
 
-- **MTV button** — hub now exposes `POST /api/screen/mtv` (plays MTV_URL
-  fullscreen on the Pi's HDMI via Chromium kiosk), `POST /api/screen/mtv/stop`
-  (returns to the idle dashboard), and `GET /api/screen/status` includes
-  an `mtv` capability flag for UI visibility. Web UI shows a **MTV** button
-  in the "Watch on the TV" panel; hides when MTV_URL is unset. TV wakes to Pi
-  input on launch, stops any existing playback, and restores dashboard when
-  stopped. Uses the same DRM-master / transparent-cursor / cage flags as the
-  idle kiosk (`screen/mtv-kiosk.sh` modeled after `screen/kiosk.sh`).
-
-- **Known issues (2026-09-19) — the kiosk approach is the wrong tool.** Verified
-  on the Pi with `mtv-screen` active:
-  - *Buffery video*: chromium runs with `--disable-gpu` under cage/pixman and
-    software-decodes the MP4s at 3840x2160@30 — one chromium process pegged at
-    100% CPU. This is exactly the dead end recorded under "Aerials on the
-    dashboard" (cage/chromium can't paint a video surface). The fix is the
-    same one: play through **mpv on DRM** (`hwdec=v4l2m2m`) like the jetstream
-    live stream, not through a browser.
-  - *No audio*: the page starts muted by design ("TAP FOR SOUND", needs a
-    click) and the root cage session has no PipeWire/Pulse anyway. Moot once
-    mpv plays it.
-  - *Cursor in the middle of the screen*: `screen/install-cursor.sh` was never
-    run on this Pi (`/usr/local/share/icons` absent), so the transparent
-    cursor theme `mtv-kiosk.sh` points at doesn't exist. Not in the runbook's
-    deploy steps.
-- **Rework (planned):** MTV is a deterministic clock-driven schedule over
-  `/videos/manifest.json` + `/videos/<id>.mp4` (seeded shuffle, epoch
-  1981-08-01, seed 1981 — see `mtv.js` `startLocal`). screen-player should
-  fetch the manifest, compute the on-air item + offset, and `POST /play` it via
-  mpv with `--start=<offset>`, chaining to the next item on EOF. Now-playing
-  credits can go through the existing overlay renderer. Drops `mtv-screen`,
-  cage and chromium from the path entirely.
+- **MTV button** — `POST /api/screen/mtv` wakes the TV and asks screen-player's
+  `mtv` profile to join channel 1. `GET /api/screen/status` retains the `mtv`
+  capability flag, and the phone shows only live-style controls for MTV.
+- **Synchronized mpv playback** — screen-player asks
+  `GET /admin/api/now?ch=1` for the current item, wall-clock offset, next item,
+  and credits. mpv starts idle on DRM, loads each MP4 with its own `start`
+  option, preloads the successor, and rechecks at every boundary. It corrects
+  drift over two seconds, retries schedule outages without dropping a queued
+  item, rejoins after a crash, and returns to the dashboard after 60 seconds of
+  failed recovery.
+- **History:** the original `mtv-screen` cage/Chromium kiosk was removed. It
+  software-decoded video poorly, had no audio, and exposed a cursor. Chromium
+  remains useful for static dashboard rendering but is not in the MTV path.
+- **Deployment blocker:** the MTV site's schedule endpoint must ship first.
+  As of 2026-09-19 it returns 404 from this development host; verify it from
+  the Pi's local-only route before deployment. Manual TV acceptance is pending.
 
 ## UI overhaul (2026-07-20) ✅ *(built + deployed)*
 
@@ -366,8 +351,9 @@ Steps, in order:
 1. **Spike** — measure `lavfi-complex` compositing (1080p aerial + corner
    stream) on the Pi. Decides whether aerials can keep playing. Record the
    numbers here.
-2. **`hub/app/mtv_schedule.py`** — port of `mtv.js` `startLocal`; unit-tested
-   against JS fixtures. Shared with the Phase 8 MTV mpv rework.
+2. **MTV resolution** — ask the site's `/admin/api/now` endpoint; do not add a
+   third copy of the schedule math in the hub. The screen-player MTV profile
+   already uses this authority.
 3. **Hub API** — `GET/POST /api/dashboard/mini`, persisted `data/hub/mini.json`,
    resolves URL/start/geometry.
 4. **`aerial-mode.py`** — 5 s tick polling the hub; swap between aerial
@@ -391,6 +377,10 @@ seconds) returned; that empty frame then sat on the TV for the 60s refresh.
 - `/api/homelab` `live.sampled_at` + page-side `tickLive()`: the position and
   progress bar advance locally every second instead of freezing for up to 2
   minutes (120s probe cache) — every overlay redraw now shows the true time.
+- Livestream dropouts, both causes closed the same night: jetstream's idle
+  watcher didn't count LAN viewers (fixed in the jetstream repo, 7dc6293), and
+  the Pi's DNS fell back past AdGuard to public resolvers (fixed with an
+  `/etc/hosts` pin on the Pi — HOWTO *Set up a fresh Pi*).
 - Follow-up (not done): the TV overlay is a PNG redrawn once a minute, so on
   the TV the readout still steps per minute. Live ticking would need
   `aerial-clock.lua` to draw the progress line like it draws the seconds.
