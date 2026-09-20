@@ -291,3 +291,4 @@ docker compose build`.
 failing, and no filesystem check fixes bad flash. Back up `.env` and `data/`
 immediately, then replace the card — a USB SSD lasts far longer. NVMe would need
 a dual adapter because the Hailo HAT holds the only PCIe slot.
+
