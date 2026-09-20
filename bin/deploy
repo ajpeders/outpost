@@ -1,0 +1,160 @@
+#!/usr/bin/env bash
+# deploy — CD agent for ~/projects/smarthome on the livingroom Pi 5.
+#
+# For each bin/deploy.d/*.conf: fetch origin/main; if it advanced past the
+# last DEPLOYED sha, fast-forward and run DEPLOY_CMD, then health-check and
+# roll back to the previous commit on failure. Every deploy (or rollback)
+# pushes a ntfy note. Conf vars (bash, sourced):
+#
+#   APP_DIR       repo path                       (default: .. of this script)
+#   BRANCH        branch to track                 (default: main)
+#   DEPLOY_CMD    how to (re)deploy               (required)
+#   HEALTH_CMD    exit 0 = healthy; retried HEALTH_TRIES times
+#                 every HEALTH_DELAY seconds      (default 4 / 10)
+#   GUARD_CMD     optional; exit 0 = defer this tick (used to skip while
+#                 someone is watching mpv)
+#
+# Run by smarthome-deploy.timer as alex (docker group member, SSH key for
+# git.thelunadog.com). Safe to run by hand: ./bin/deploy.
+#
+# Modeled on isis-alex's bin/deploy, trimmed for a single-app Pi: no CI gate
+# (this repo doesn't have one), no Forgejo status posts, localhost ntfy not
+# reachable so bin/ntfy-alert goes via the Traefik fallback.
+set -uo pipefail
+
+REPO="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$REPO"
+
+CONF_DIR="$REPO/bin/deploy.d"
+STATE_DIR="$REPO/state/deploy"
+mkdir -p "$STATE_DIR"
+
+# One-deep rotation so the decision log can't grow unbounded.
+[[ -f "$STATE_DIR/deploy.log" && $(stat -c%s "$STATE_DIR/deploy.log") -gt 5242880 ]] \
+  && mv "$STATE_DIR/deploy.log" "$STATE_DIR/deploy.log.1"
+
+log() { echo "[$(date '+%F %T')] $*" | tee -a "$STATE_DIR/deploy.log"; }
+notify() { "$REPO/bin/ntfy-alert" "$1" "$2" "$3" "$4" || true; }
+
+# One run at a time — the timer + a hand run overlap freely otherwise.
+exec 9>"$STATE_DIR/.lock"
+if ! flock -n 9; then
+  log "another deploy run holds the lock — skipping this tick"
+  exit 0
+fi
+
+deploy_one() {
+  local conf="$1" name
+  name="$(basename "$conf" .conf)"
+
+  local APP_DIR="$REPO" BRANCH="main" DEPLOY_CMD="" HEALTH_CMD=""
+  local HEALTH_TRIES=4 HEALTH_DELAY=10 GUARD_CMD=""
+  # shellcheck disable=SC1090
+  . "$conf"
+  [[ -z "$DEPLOY_CMD" ]] && { log "$name: conf missing DEPLOY_CMD — skipping"; return; }
+
+  local dir="$APP_DIR"
+  [[ -d "$dir/.git" ]] || { log "$name: $APP_DIR is not a git repo — skipping"; return; }
+
+  # Never clobber work-in-progress.
+  if [[ -n "$(git -C "$dir" status --porcelain)" ]]; then
+    log "$name: working tree dirty — skipping"; return
+  fi
+  if [[ "$(git -C "$dir" branch --show-current)" != "$BRANCH" ]]; then
+    log "$name: not on $BRANCH — skipping"; return
+  fi
+
+  git -C "$dir" fetch --quiet origin "$BRANCH" || { log "$name: fetch failed"; return; }
+  local local_sha remote_sha
+  local_sha="$(git -C "$dir" rev-parse HEAD)"
+  remote_sha="$(git -C "$dir" rev-parse "origin/$BRANCH")"
+
+  # Stamp-based "what's DEPLOYED" — git sync alone can't tell: commits made
+  # and pushed from this live checkout leave local==remote while the running
+  # containers are stale. No stamp yet + already in sync = baseline (assume
+  # running state matches the checkout; don't storm-rebuild on rollout).
+  local deployed_sha; deployed_sha="$(cat "$STATE_DIR/$name.deployed" 2>/dev/null || true)"
+  if [[ -z "$deployed_sha" && "$local_sha" == "$remote_sha" ]]; then
+    echo "$remote_sha" > "$STATE_DIR/$name.deployed"
+    return
+  fi
+  [[ "$remote_sha" == "$deployed_sha" ]] && return
+
+  # A tip that already failed once is not retried (the timer would otherwise
+  # rebuild+rollback+alert in a loop); a new push clears it.
+  if [[ "$(cat "$STATE_DIR/$name.failed-sha" 2>/dev/null)" == "$remote_sha" ]]; then
+    log "$name: ${remote_sha:0:10} already failed a deploy — waiting for a new push"
+    return
+  fi
+
+  # Only touch the checkout when origin is STRICTLY ahead. Local-ahead means
+  # someone is developing here; diverged means a human needs to reconcile —
+  # alert once per remote tip, touch nothing.
+  if [[ "$local_sha" != "$remote_sha" ]] \
+     && ! git -C "$dir" merge-base --is-ancestor "$local_sha" "$remote_sha"; then
+    if git -C "$dir" merge-base --is-ancestor "$remote_sha" "$local_sha"; then
+      log "$name: local is ahead of origin/$BRANCH — skipping"
+    else
+      if [[ "$(cat "$STATE_DIR/$name.diverged-alerted" 2>/dev/null)" != "$remote_sha" ]]; then
+        notify high x "deploy blocked: $name" "local checkout diverged from origin/$BRANCH — reconcile manually"
+        echo "$remote_sha" > "$STATE_DIR/$name.diverged-alerted"
+      fi
+      log "$name: diverged from origin/$BRANCH — skipping"
+    fi
+    return
+  fi
+
+  # Defer if the guard says the TV is busy (mpv playing). The Pi's screen-player
+  # is host-side systemd, so a docker rebuild wouldn't kill mpv anyway — but
+  # the CLAUDE.md working rules ask us to defer anyway: hub rebuilds blip the
+  # phone UI, and an appletv rebuild mid-stream is the obvious footgun.
+  if [[ -n "$GUARD_CMD" ]] && bash -c "$GUARD_CMD"; then
+    log "$name: busy (guard) — deferring ${remote_sha:0:10}"
+    return
+  fi
+
+  local short="${remote_sha:0:10}"
+  local subject; subject="$(git -C "$dir" log -1 --format=%s "$remote_sha")"
+
+  log "$name: deploying $local_sha -> $remote_sha ($subject)"
+  git -C "$dir" merge --ff-only --quiet "origin/$BRANCH" || {
+    notify high x "deploy failed: $name" "cannot fast-forward to $short (diverged history)"
+    return
+  }
+  if ! bash -c "$DEPLOY_CMD" >>"$STATE_DIR/$name.log" 2>&1; then
+    log "$name: DEPLOY_CMD failed — rolling back to ${local_sha:0:10}"
+    git -C "$dir" reset --hard --quiet "$local_sha"
+    bash -c "$DEPLOY_CMD" >>"$STATE_DIR/$name.log" 2>&1 || true
+    echo "$remote_sha" > "$STATE_DIR/$name.failed-sha"
+    notify urgent rotating_light "deploy FAILED: $name" "$short build/up failed — rolled back to ${local_sha:0:10}. See state/deploy/$name.log"
+    return
+  fi
+
+  local ok=0 i
+  for ((i=1; i<=HEALTH_TRIES; i++)); do
+    if [[ -z "$HEALTH_CMD" ]] || bash -c "$HEALTH_CMD" >/dev/null 2>&1; then ok=1; break; fi
+    sleep "$HEALTH_DELAY"
+  done
+
+  if [[ "$ok" == 1 ]]; then
+    echo "$remote_sha" > "$STATE_DIR/$name.deployed"
+    rm -f "$STATE_DIR/$name.failed-sha"
+    notify high rocket "deployed: $name" "$short — $subject"
+    log "$name: $short deployed + healthy"
+  else
+    log "$name: health check failed — rolling back to ${local_sha:0:10}"
+    git -C "$dir" reset --hard --quiet "$local_sha"
+    bash -c "$DEPLOY_CMD" >>"$STATE_DIR/$name.log" 2>&1 || true
+    echo "$remote_sha" > "$STATE_DIR/$name.failed-sha"
+    notify urgent rotating_light "deploy FAILED: $name" "$short unhealthy after deploy — rolled back to ${local_sha:0:10}"
+  fi
+}
+
+shopt -s nullglob
+confs=("$CONF_DIR"/*.conf)
+[[ $# -ge 1 ]] && confs=("$CONF_DIR/$1.conf")
+[[ ${#confs[@]} -eq 0 ]] && { log "no deploy.d/*.conf found"; exit 0; }
+for conf in "${confs[@]}"; do
+  [[ -f "$conf" ]] || { log "no such app conf: $conf"; exit 1; }
+  deploy_one "$conf"
+done

@@ -22,3 +22,7 @@ watchdog/
 # Claude Code local machine settings
 .claude/settings.local.json
 .playwright-mcp/
+
+# CD agent: deploy script + ntfy creds + per-deploy state. Mirrors the
+# isis-alex homelab pattern — infra lives on the host, not in the repo.
+state/

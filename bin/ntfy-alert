@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# ntfy-alert — publish a smarthome (livingroom-pi) alert to ntfy.
+#
+# Usage: ntfy-alert <priority> <tags> <title> <message>
+#   priority: min|low|default|high|urgent   (ntfy priority)
+#   tags:     comma-sep emoji shortcodes, e.g. rotating_light,warning
+#
+# Token + URL + topic live in ~/.config/smarthome-deploy/.env (0600) so the
+# secret is not committed alongside the repo. Primary target is the local ntfy
+# instance on isis-alex (reachable over LAN via Traefik — the localhost-only
+# port is not exposed across hosts). Falls back to the public Traefik route if
+# the primary fails, mirrors bin/ntfy-alert on isis-alex.
+#
+# Never fails the caller: a broken alert path must not abort a deploy.
+set -uo pipefail
+
+CONF="${HOME}/.config/smarthome-deploy/.env"
+_env_url="${NTFY_ALERT_URL:-}"; _env_topic="${NTFY_ALERT_TOPIC:-}"; _env_token="${NTFY_ALERT_TOKEN:-}"
+_env_fallback="${NTFY_ALERT_FALLBACK_URL:-}"
+[[ -f "$CONF" ]] && { set -a; . "$CONF"; set +a; }
+[[ -n "$_env_url"     ]] && NTFY_ALERT_URL="$_env_url"
+[[ -n "$_env_fallback" ]] && NTFY_ALERT_FALLBACK_URL="$_env_fallback"
+[[ -n "$_env_topic"   ]] && NTFY_ALERT_TOPIC="$_env_topic"
+[[ -n "$_env_token"   ]] && NTFY_ALERT_TOKEN="$_env_token"
+
+URL="${NTFY_ALERT_URL:-https://ntfy.thelunadog.com}"
+FALLBACK_URL="${NTFY_ALERT_FALLBACK_URL:-}"
+TOPIC="${NTFY_ALERT_TOPIC:-homelab-alerts}"
+TOKEN="${NTFY_ALERT_TOKEN:-}"
+FAILLOG="${HOME}/.config/smarthome-deploy/ntfy-failures.log"
+
+prio="${1:-default}"; tags="${2:-warning}"; title="${3:-smarthome}"; msg="${4:-}"
+
+auth=()
+[[ -n "$TOKEN" ]] && auth=(-H "Authorization: Bearer $TOKEN")
+
+_publish() {
+  curl -fsS --max-time 10 "${auth[@]}" \
+    -H "Title: $title" -H "Priority: $prio" -H "Tags: $tags" \
+    -d "$msg" "$1/$TOPIC" >/dev/null 2>&1
+}
+
+_publish "$URL" && exit 0
+[[ -n "$FALLBACK_URL" ]] && _publish "$FALLBACK_URL" && exit 0
+
+echo "[ntfy-alert] WARN: failed to publish '$title' to $TOPIC (primary $URL${FALLBACK_URL:+, fallback $FALLBACK_URL})" >&2
+logger -t ntfy-alert -p user.err "failed to publish '$title' to $TOPIC" 2>/dev/null || true
+if mkdir -p "$(dirname "$FAILLOG")" 2>/dev/null; then
+  printf '%s\t%s\t%s\n' "$(date +%s)" "$(date -Is)" "$title" >> "$FAILLOG" 2>/dev/null || true
+  chmod 600 "$FAILLOG" 2>/dev/null || true
+fi
+exit 1
