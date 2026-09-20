@@ -145,7 +145,7 @@ the TV set (CEC), hosts the hub app, and runs scheduled automations.
   in hero/dashboard/resume rows, alarm rows no longer squish on narrow phones,
   idle hero copy, UI tested headless end-to-end (13 interactive checks).
 
-## Phase 8 — MTV on the TV (2026-09-19) ✅ *(built, awaiting endpoint deploy)*
+## Phase 8 — MTV on the TV (2026-09-19) ✅ *(built + deployed)*
 
 - **MTV button** — `POST /api/screen/mtv` wakes the TV and asks screen-player's
   `mtv` profile to join channel 1. `GET /api/screen/status` retains the `mtv`
@@ -160,9 +160,12 @@ the TV set (CEC), hosts the hub app, and runs scheduled automations.
 - **History:** the original `mtv-screen` cage/Chromium kiosk was removed. It
   software-decoded video poorly, had no audio, and exposed a cursor. Chromium
   remains useful for static dashboard rendering but is not in the MTV path.
-- **Deployment blocker:** the MTV site's schedule endpoint must ship first.
-  As of 2026-09-19 it returns 404 from this development host; verify it from
-  the Pi's local-only route before deployment. Manual TV acceptance is pending.
+- **Deployed and accepted:** the MTV schedule endpoint and Pi consumer are live.
+  Startup and a natural song boundary stayed within 1.7s of the authoritative
+  schedule with AAC audio, no black gap, no DRM playback error, and zero frame
+  or decoder drops. mpv used 82% of one CPU core for 1080p software decode
+  (above the planned 60% check, but with clean playback and ample total Pi
+  headroom). Normal stop restored `aerial-screen` and the dashboard.
 
 ## UI overhaul (2026-07-20) ✅ *(built + deployed)*
 
