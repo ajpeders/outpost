@@ -166,6 +166,12 @@ the TV set (CEC), hosts the hub app, and runs scheduled automations.
   or decoder drops. mpv used 82% of one CPU core for 1080p software decode
   (above the planned 60% check, but with clean playback and ample total Pi
   headroom). Normal stop restored `aerial-screen` and the dashboard.
+- **Native 4K follow-up:** primarily blocked on the MTV mirror producing a 4K
+  rendition alongside its browser-compatible 1080p files. Once available,
+  teach the `mtv` profile to select 2160p, choose a 4K DRM mode and viable Pi 5
+  hardware-decode path, scale OSD credits for the 4K framebuffer, and measure
+  frame drops, CPU/GPU load, thermals, and song-boundary behavior. Keep 1080p
+  as the fallback if native 4K cannot play cleanly.
 
 ## UI overhaul (2026-07-20) ✅ *(built + deployed)*
 
