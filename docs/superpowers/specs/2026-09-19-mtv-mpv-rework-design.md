@@ -58,8 +58,9 @@ sorting. Ports the schedule math to Python and returns:
 }
 ```
 
-- `ch` defaults to 1. Unknown channel, missing manifest, or a channel with no
-  playable items → 404 `{"error": "..."}` (the player's NO SIGNAL case).
+- `ch` defaults to 1. Unknown channel, missing manifest, missing
+  `channels.json`, or a channel with no playable items → 404
+  `{"error": "..."}` (the player's NO SIGNAL case).
 - The port must reproduce the JavaScript exactly: `Math.imul` and `>>>`
   semantics via masking to 32 bits, `(x ^ (x >>> 14)) >>> 0` as an unsigned
   32-bit value divided by 2^32, `Math.floor(rnd() * (i + 1))` for the swap
@@ -68,7 +69,9 @@ sorting. Ports the schedule math to Python and returns:
 - `title` is the raw manifest title. `now.artist` / `now.song` (and the same
   on `next`) come from a port of the player's `creditText` (`mtv.js`): prefer
   the manifest item's `artist` / `track` fields when present, otherwise strip
-  the "(Official Video)"-style suffix and split on the first " - ".
+  the "(Official Video)"-style suffix and split on the first dash separator.
+  Port from the regexes in `creditText` verbatim (they accept hyphen, en and
+  em dashes and strip wrapping quotes from the song), not from this prose.
 - Accepted divergences from the browser player: (1) it skips ids that failed
   to play in that session (its `bad` set), so one viewer with a broken file
   can be a song off from the server; (2) when the remembered channel is
@@ -262,7 +265,8 @@ the kiosk swap go too.
 - Unit (offline, existing screen-player test style): fake `/admin/api/now`
   server and a fake mpv IPC socket that records commands and can emit
   property-change events. Assert: spawn args carry `--idle=yes` and no file;
-  the conductor's first two commands are `loadfile now replace -1
+  the conductor's first two `loadfile` commands (after its two
+  `observe_property` registrations) are `loadfile now replace -1
   start=<offset>` and `loadfile next append -1 start=0`; a `file-loaded`
   event while `path` equals `now`'s full URL and `time-pos` is within 2 s
   of `offset` appends the new next with `start=0` and no replace; a
