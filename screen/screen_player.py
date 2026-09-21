@@ -243,7 +243,11 @@ def _build_args(url: str | None, headers: dict | None, audio_only: bool,
                  "--write-filename-in-watch-later-config",
                  "--watch-later-options=start,sid"]
     elif profile == "mtv":
-        video = ["--vo=drm", f"--drm-mode={m}", "--hwdec=no",
+        # HEVC (hvc1) → V4L2 m2m hardware decode on the Pi5's rpi_hevc_dec
+        # (~5% CPU, smooth playback). For H.264 streams (legacy files before
+        # the mtv library was re-encoded, or anything YouTube hands us as
+        # avc1) mpv falls back to software decode — same as before, no worse.
+        video = ["--vo=drm", f"--drm-mode={m}", "--hwdec=v4l2m2m",
                  "--cache=yes", "--cache-secs=4", "--demuxer-readahead-secs=4",
                  "--sid=no", "--sub-auto=no", f"--input-ipc-server={IPC_SOCKET}",
                  "--idle=yes", "--prefetch-playlist=yes",
