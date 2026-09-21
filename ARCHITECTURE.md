@@ -87,8 +87,9 @@ the content, exposes `/status`, `/play`, `/control`, `/stop`, and handles TV
 input reclaim. The supervisor relaunches mpv when playback wedges. Its `mtv`
 profile asks the MTV site's local-only schedule API what is on now, starts that
 MP4 at the wall-clock offset, preloads the next item, and rechecks the schedule
-at each boundary. A persistent mpv IPC conductor updates credits and corrects
-drift without putting Chromium in the video path.
+at each boundary. A persistent mpv IPC conductor keeps MTV-style credits up as
+an `osd-overlay` (artist / "song" / album / year, in the Jost font bundled in
+`screen/fonts/`) and corrects drift without putting Chromium in the video path.
 
 **Media library** — `file`/`shuffle` playback and the media browser read a
 read-only CIFS/SMB share mounted on the host at `/mnt/share` (`SCREEN_MEDIA_ROOT`

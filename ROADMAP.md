@@ -185,15 +185,16 @@ the TV set (CEC), hosts the hub app, and runs scheduled automations.
   Wi-Fi power save (A/B'd, no difference). Remaining: plug the Pi into
   Ethernet; verify on the next long jetstream session that the 30 s viewer
   gaps are gone (`docker logs jetstream | grep "192.168.0.220 (idle"`).
-- **MTV persistent on-screen credits:** today's `show-text` call from the
-  `MtvConductor` displays artist/song for 8 seconds at song start and once
-  near the end. Users want the credits to stay on screen for the entire
-  track. Replace the timed fade with a persistent, low-contrast OSD that
-  re-asserts on every schedule refresh, hides gracefully on stop, and
-  remains readable from the couch on the 4K framebuffer (font size, margin,
-  outline sized for 1920x1080 today; review for 2160p later). Verify that
-  the persistent OSD does not conflict with mpv's normal status line and
-  that the conductor's IPC activity stays cheap enough for long tracks.
+- **MTV on-screen credits** ✅ *(2026-09-21)* — the first "persistent" version
+  (9f4cece) used `show-text` with a `-1` duration, which mpv reads as "use
+  `--osd-duration`" (1 s), so the credits only flashed at song start. Now an
+  `osd-overlay` (ASS events, 1920x1080 canvas) stays up for the whole track in
+  the classic MTV order: **Artist** / "Song" / Album / Year, set in Jost (free
+  Futura/Kabel-style face, bundled in `screen/fonts/`, OFL). Album and year come
+  from the MTV `now` API and are empty until mediaDb's music-video enrichment
+  works (0/556 enriched on 2026-09-21: its YouTube lookups fail). Titles that
+  don't split cleanly still show YouTube cruft ("(Official Video) Live"); that's
+  MTV's `credit()` parser, not the Pi.
 - **TV sleep while streaming:** the CEC `tv-keepalive` unit only acts when
   the Apple TV sleeps, not during Pi-side playback; the TV appears to drop
   to standby during a long MTV/jetstream session anyway. Verify on the Pi

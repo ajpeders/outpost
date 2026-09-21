@@ -35,6 +35,9 @@ from urllib.parse import parse_qs, quote, urlencode, urljoin, urlparse
 from urllib.request import urlopen
 
 _HERE = osp.dirname(osp.abspath(__file__))
+# Bundled OSD fonts (MTV credits). Font files only: libass tries to load
+# everything in the dir and logs an error per non-font entry.
+FONTS_DIR = osp.join(_HERE, "fonts", "ttf")
 IPC_SOCKET = os.environ.get("SCREEN_MPV_IPC", "/tmp/mpv-ipc")  # for sub toggle etc.
 # idle-dashboard kiosk service — stopped while mpv plays (both need DRM master),
 # restarted when playback ends.
@@ -254,8 +257,7 @@ def _build_args(url: str | None, headers: dict | None, audio_only: bool,
                  "--cache=yes", "--cache-secs=30", "--demuxer-readahead-secs=30",
                  "--sid=no", "--sub-auto=no", f"--input-ipc-server={IPC_SOCKET}",
                  "--idle=yes", "--prefetch-playlist=yes",
-                 "--osd-font-size=42", "--osd-margin-x=56", "--osd-margin-y=46",
-                 "--osd-align-x=left", "--osd-align-y=bottom", "--osd-border-size=2"]
+                 f"--osd-fonts-dir={FONTS_DIR}"]
     else:
         # live HLS (H.264): plain drm VO — robust across the transcode restarts
         # jetstream does on skip (gpu-next "export fails" on relaunch). Pi 5 has
@@ -619,16 +621,39 @@ def _play_mtv(base: str, channel: int) -> dict:
     return {"url": url, "title": _title, "subtitle": _subtitle}
 
 
-# Low-contrast ASS prefix for the persistent MTV credits OSD. show-text renders
-# ASS override tags; \alpha&H50& (~31% transparent) keeps the artist/song legible
-# from the couch without glaring over the video. The mtv profile's OSD constants
-# (--osd-font-size=42, --osd-border-size=2, bottom-left margins) provide the
-# white fill + black outline this dims.
-_CREDITS_OSD_PREFIX = "{\\alpha&H50&}"
+# MTV credits: a persistent ASS overlay in the lower-left, classic MTV order
+# (Artist / "Song" / Album / Year). osd-overlay stays up until replaced or
+# removed; show-text can't — a negative duration means --osd-duration (1s).
+# Jost (screen/fonts, OFL) is a free Futura/Kabel-style face, the MTV look.
+# Coordinates are in a 1920x1080 canvas that mpv scales to the framebuffer.
+CREDITS_OVERLAY_ID = 1
+_CREDITS_STYLE = ("{\\an1\\pos(96,996)\\fnJost*\\1c&HFFFFFF&\\1a&H20&"
+                  "\\bord2\\3c&H000000&\\3a&H40&\\shad1\\4a&H90&}")
 
 
-def _credits_osd_text(credits: str) -> str:
-    return _CREDITS_OSD_PREFIX + credits
+def _ass_escape(text: str) -> str:
+    """Make schedule text literal: a stray { or \\ would start an ASS tag."""
+    return (text.replace("\\", "\\\u2060").replace("{", "\\{").replace("}", "\\}")
+            .replace("\n", " "))
+
+
+def _credits_overlay(item: dict | None) -> dict:
+    """osd-overlay IPC command showing (or, with nothing to show, removing) credits."""
+    item = item or {}
+    artist, song, album, year = (_clean_text(item.get(k))
+                                 for k in ("artist", "song", "album", "year"))
+    lines = []
+    if artist:
+        lines.append("{\\b1\\fs46}" + _ass_escape(artist))
+    if song:
+        lines.append("{\\b0\\fs40}\u201c" + _ass_escape(song) + "\u201d")
+    for extra in (album, year):
+        if extra:
+            lines.append("{\\b0\\fs32}" + _ass_escape(extra))
+    if not lines:
+        return {"name": "osd-overlay", "id": CREDITS_OVERLAY_ID, "format": "none", "data": ""}
+    return {"name": "osd-overlay", "id": CREDITS_OVERLAY_ID, "format": "ass-events",
+            "data": _CREDITS_STYLE + "\\N".join(lines), "res_x": 1920, "res_y": 1080}
 
 
 # How far (s) the TV may trail the broadcast schedule before the conductor
@@ -656,7 +681,6 @@ class MtvConductor(threading.Thread):
         self.failure_logged = False
         self.correction_pending = False
         self.current_path: str | None = None
-        self.current_credits: str | None = None
 
     def _current(self) -> bool:
         return _proc is self.proc and _profile == "mtv" and not _stopped
@@ -691,7 +715,7 @@ class MtvConductor(threading.Thread):
             if self._current() and self.proc.poll() is None:
                 self.proc.terminate()
 
-    def command(self, command: list) -> dict | None:
+    def command(self, command: list | dict) -> dict | None:
         if self.closed.is_set() or not self.sock:
             return None
         with self.write_lock:
@@ -752,11 +776,7 @@ class MtvConductor(threading.Thread):
                 _url, _title, _subtitle = expected, artist, song
                 _mtv = {**self.state, "schedule": data}
         self.current_path = expected
-        self.current_credits = "\n".join(v for v in (artist, song) if v)
-        # Persistent: -1 keeps the credits up until the next show-text (the next
-        # song's credits, asserted on the next refresh). Low-contrast via the
-        # \alpha ASS tag so it doesn't glare over the video.
-        self.command(["show-text", _credits_osd_text(self.current_credits), -1])
+        self.command(_credits_overlay(now))
 
     def _connect(self) -> bool:
         deadline = time.time() + 5
@@ -785,7 +805,7 @@ class MtvConductor(threading.Thread):
                     if self.idle:
                         # Playlist drained: hide the persistent credits until the
                         # next song's file-loaded re-asserts them.
-                        self.command(["show-text", "", 1])
+                        self.command(_credits_overlay(None))
 
     def run(self) -> None:
         if not self._connect():

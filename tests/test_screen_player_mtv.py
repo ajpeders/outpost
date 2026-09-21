@@ -103,6 +103,33 @@ class ScreenPlayerMtvTests(unittest.TestCase):
         self.assertIn("--demuxer-readahead-secs=30", args)
         self.assertIn("--network-timeout=5", args)
 
+    def test_mtv_profile_loads_bundled_credits_font(self):
+        args = player._build_args("https://example.test/videos/now-id.mp4", None, False, "mtv")
+        fonts = [a.split("=", 1)[1] for a in args if a.startswith("--osd-fonts-dir=")]
+        self.assertEqual(len(fonts), 1)
+        self.assertTrue(any(f.startswith("Jost") for f in os.listdir(fonts[0])))
+
+    def test_credits_follow_mtv_order_with_album_and_year(self):
+        data = player._credits_overlay({"artist": "Tears for Fears",
+                                        "song": "Everybody Wants to Rule the World",
+                                        "album": "Songs from the Big Chair",
+                                        "year": 1985})["data"]
+        lines = data.split("\\N")
+        self.assertIn("Tears for Fears", lines[0])
+        self.assertIn("\u201cEverybody Wants to Rule the World\u201d", lines[1])
+        self.assertIn("Songs from the Big Chair", lines[2])
+        self.assertIn("1985", lines[3])
+
+    def test_credits_skip_missing_fields_and_escape_ass(self):
+        data = player._credits_overlay({"artist": "A{\\b1}B", "song": "S",
+                                        "album": "", "year": None})["data"]
+        self.assertEqual(len(data.split("\\N")), 2)
+        self.assertIn("A\\{", data)          # a literal brace can't open a tag
+        self.assertNotIn("{\\b1}B", data)
+
+    def test_credits_without_any_text_remove_the_overlay(self):
+        self.assertEqual(player._credits_overlay({"artist": None, "song": ""})["format"], "none")
+
     def test_live_profile_keeps_small_buffer_but_times_out_fast(self):
         args = player._build_args("https://example.test/live.m3u8", None, False, "live")
         self.assertIn("--cache-secs=4", args)
@@ -147,8 +174,12 @@ class ScreenPlayerMtvTests(unittest.TestCase):
                        "append", -1, "start=0"], commands)
         self.assertNotIn(["loadfile", self.base + "/videos/now-id.mp4",
                           "replace", -1, "start=12.5"], commands)
-        # Persistent credits: show-text with -1 (not the old 8-second fade).
-        self.assertIn(["show-text", player._credits_osd_text("Artist\nSong"), -1], commands)
+        # Persistent credits: an osd-overlay (show-text -1 only lasted 1s).
+        self.assertIn(player._credits_overlay(SCHEDULE["now"]), commands)
+        overlay = player._credits_overlay(SCHEDULE["now"])
+        self.assertEqual(overlay["format"], "ass-events")
+        self.assertIn("Artist", overlay["data"])
+        self.assertIn("\u201cSong\u201d", overlay["data"])
         with patch.object(player, "_ipc_prop", return_value=None):
             status = player._status()
         self.assertEqual(status["source"], "mtv")
@@ -171,7 +202,8 @@ class ScreenPlayerMtvTests(unittest.TestCase):
             "event": "property-change", "name": "idle-active", "data": True,
         })
         self.assertTrue(conductor.idle)
-        self.assertIn(["show-text", "", 1], commands)
+        self.assertIn({"name": "osd-overlay", "id": player.CREDITS_OVERLAY_ID,
+                       "format": "none", "data": ""}, commands)
 
     def test_conductor_corrects_wrong_item(self):
         proc = object()
