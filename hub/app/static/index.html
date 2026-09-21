@@ -845,10 +845,12 @@ $('#w-music').addEventListener('click', async () => {
 async function switchHdmi(n, button) {
   toast('Switching to HDMI ' + n);
   setBusy(button, true);
-  // optimistic highlight — /api/tv/input/{n} doesn't update the hub's
-  // _active_input (it's a raw CEC proxy), so without this the highlight
-  // wouldn't move until the next event that does update the state.
-  $$('#input-seg button').forEach(b => b.classList.toggle('active', b.dataset.hdmi === String(n)));
+  // No optimistic highlight: /api/tv/input/{n} doesn't update the hub's
+  // _active_input (it's a raw CEC proxy), so any preview would either
+  // snap right back on refreshInput, or — worse — lie about what the TV
+  // is showing. Best-effort: send the CEC message, then trust the
+  // refreshInput readback so the highlight always reflects what the hub
+  // actually knows about the active source.
   const r = await api('POST', '/api/tv/input/' + n);
   setBusy(button, false);
   if (!r.ok) toast(r.data?.error || 'Input switch failed');
