@@ -1,4 +1,4 @@
-# livingroom-pi roadmap
+# smarthome roadmap
 
 ## Agent-sized TODO queue — 2026-09-18
 

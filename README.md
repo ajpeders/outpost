@@ -1,4 +1,4 @@
-# livingroom-pi
+# smarthome
 
 Self-contained living-room controller that runs **entirely on a Raspberry Pi 5**
 wired to the TV. No homelab / Traefik dependency — if the homelab is down, the

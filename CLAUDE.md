@@ -1,4 +1,4 @@
-# livingroom-pi — working rules
+# smarthome — working rules
 
 This stack drives the living-room TV **live**. Restarts are user-visible.
 
