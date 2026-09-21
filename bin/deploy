@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# deploy — CD agent for ~/projects/smarthome on the livingroom Pi 5.
+# deploy — CD agent for ~/projects/outpost on the livingroom Pi 5.
 #
 # For each bin/deploy.d/*.conf: fetch origin/main; if it advanced past the
 # last DEPLOYED sha, fast-forward and run DEPLOY_CMD, then health-check and
@@ -14,7 +14,7 @@
 #   GUARD_CMD     optional; exit 0 = defer this tick (used to skip while
 #                 someone is watching mpv)
 #
-# Run by smarthome-deploy.timer as alex (docker group member, SSH key for
+# Run by outpost-deploy.timer as alex (docker group member, SSH key for
 # git.thelunadog.com). Safe to run by hand: ./bin/deploy.
 #
 # Modeled on isis-alex's bin/deploy, trimmed for a single-app Pi: no CI gate

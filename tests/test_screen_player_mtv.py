@@ -264,6 +264,14 @@ class ScreenPlayerMtvTests(unittest.TestCase):
         self.assertNotIn(["loadfile", self.base + "/videos/now-id.mp4",
                           "replace", -1, "start=12.5"], commands)
 
+    def test_conductor_waits_for_time_pos_on_right_item(self):
+        # mpv can publish the new path before time-pos exists at a song
+        # boundary. Reloading then would seek to the wall-clock offset and skip
+        # the first seconds of the successor.
+        commands = self._refresh_with_position(None)
+        self.assertNotIn(["loadfile", self.base + "/videos/now-id.mp4",
+                          "replace", -1, "start=12.5"], commands)
+
     def test_conductor_corrects_large_drift_on_right_item(self):
         commands = self._refresh_with_position(SCHEDULE["now"]["offset"] + 12)
         self.assertIn(["loadfile", self.base + "/videos/now-id.mp4",

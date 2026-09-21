@@ -1,4 +1,4 @@
-# smarthome roadmap
+# Outpost roadmap
 
 ## Agent-sized TODO queue — 2026-09-18
 
@@ -296,11 +296,11 @@ The library browser and the `file`/`shuffle` sources were returning `400` on
 `/api/media/list` because the SMB share wasn't mounted (no `cifs-utils`, no
 fstab entry). The read-only CIFS mount is now set up on the host:
 
-- `apt-get install cifs-utils`; credentials in `/etc/smarthome-smb.credentials`
+- `apt-get install cifs-utils`; credentials in `/etc/outpost-smb.credentials`
   (root-only, `username=ween`).
 - `/etc/fstab`: `//192.168.0.176/share /mnt/share cifs …,ro,_netdev,nofail,
   x-systemd.automount,x-systemd.mount-timeout=15s` (pre-change fstab backed up
-  to `/etc/fstab.before-smarthome-library`).
+  to `/etc/fstab.before-outpost-library`).
 - `systemctl start mnt-share.automount`; first access mounts it. Verified
   `findmnt`, `/api/media/list` (root + nested), `/api/media/resume`, and an SMB
   file read all return 200.

@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# ntfy-alert — publish a smarthome (livingroom-pi) alert to ntfy.
+# ntfy-alert — publish an Outpost alert to ntfy.
 #
 # Usage: ntfy-alert <priority> <tags> <title> <message>
 #   priority: min|low|default|high|urgent   (ntfy priority)
 #   tags:     comma-sep emoji shortcodes, e.g. rotating_light,warning
 #
-# Token + URL + topic live in ~/.config/smarthome-deploy/.env (0600) so the
+# Token + URL + topic live in ~/.config/outpost-deploy/.env (0600) so the
 # secret is not committed alongside the repo. Primary target is the local ntfy
 # instance on isis-alex (reachable over LAN via Traefik — the localhost-only
 # port is not exposed across hosts). Falls back to the public Traefik route if
@@ -14,7 +14,7 @@
 # Never fails the caller: a broken alert path must not abort a deploy.
 set -uo pipefail
 
-CONF="${HOME}/.config/smarthome-deploy/.env"
+CONF="${HOME}/.config/outpost-deploy/.env"
 _env_url="${NTFY_ALERT_URL:-}"; _env_topic="${NTFY_ALERT_TOPIC:-}"; _env_token="${NTFY_ALERT_TOKEN:-}"
 _env_fallback="${NTFY_ALERT_FALLBACK_URL:-}"
 [[ -f "$CONF" ]] && { set -a; . "$CONF"; set +a; }
@@ -27,9 +27,9 @@ URL="${NTFY_ALERT_URL:-https://ntfy.thelunadog.com}"
 FALLBACK_URL="${NTFY_ALERT_FALLBACK_URL:-}"
 TOPIC="${NTFY_ALERT_TOPIC:-homelab-alerts}"
 TOKEN="${NTFY_ALERT_TOKEN:-}"
-FAILLOG="${HOME}/.config/smarthome-deploy/ntfy-failures.log"
+FAILLOG="${HOME}/.config/outpost-deploy/ntfy-failures.log"
 
-prio="${1:-default}"; tags="${2:-warning}"; title="${3:-smarthome}"; msg="${4:-}"
+prio="${1:-default}"; tags="${2:-warning}"; title="${3:-outpost}"; msg="${4:-}"
 
 auth=()
 [[ -n "$TOKEN" ]] && auth=(-H "Authorization: Bearer $TOKEN")

@@ -1,6 +1,6 @@
 # MTV on the TV via mpv — design
 
-Date: 2026-09-19. Status: **approved design; smarthome-side implementation in
+Date: 2026-09-19. Status: **approved design; Outpost-side implementation in
 progress in a separate session (uncommitted in the working tree as of the
 evening of 2026-09-19). The mtv-repo endpoint (§1) is not started.** This
 spec is the source of truth; where the working tree and this text disagree,

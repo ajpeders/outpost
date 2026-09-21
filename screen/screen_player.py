@@ -755,8 +755,12 @@ class MtvConductor(threading.Thread):
         pos_reply = self.command(["get_property", "time-pos"])
         pos = pos_reply.get("data") if pos_reply else None
         expected = _mtv_item_url(self.state["base"], data, data["now"])
-        matched = (path == expected and pos is not None
-                   and abs(float(pos) - float(data["now"]["offset"])) <= MTV_DRIFT_TOLERANCE)
+        # Right after a queued successor becomes current, mpv can report the
+        # new path before time-pos is available. Do not hard-reload in that
+        # transient state: doing so seeks to the wall-clock offset and skips the
+        # first seconds of the new video.
+        matched = (path == expected and (pos is None or
+                   abs(float(pos) - float(data["now"]["offset"])) <= MTV_DRIFT_TOLERANCE))
         if not matched:
             if self.correction_pending:
                 _log_event("MTV still differs after correction — waiting for next boundary")

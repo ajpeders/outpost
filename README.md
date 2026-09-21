@@ -1,4 +1,4 @@
-# smarthome
+# Outpost
 
 Self-contained living-room controller that runs **entirely on a Raspberry Pi 5**
 wired to the TV. No homelab / Traefik dependency — if the homelab is down, the
@@ -75,13 +75,13 @@ On Trixie the `chromium-browser` package installs the binary as `chromium`;
 
 ```sh
 # on the Pi (`pi` below is your own ~/.ssh/config host alias for it):
-git clone ssh://git@git.thelunadog.com:2222/alex/smarthome.git ~/projects/smarthome
+git clone ssh://git@git.thelunadog.com:2222/alex/outpost.git ~/projects/outpost
 
 # or push a working copy from this machine instead:
-rsync -a --exclude .env --exclude data/ ~/projects/smarthome/ pi:~/projects/smarthome/
+rsync -a --exclude .env --exclude data/ ~/projects/outpost/ pi:~/projects/outpost/
 
 # then, on the Pi:
-cd ~/projects/smarthome
+cd ~/projects/outpost
 cp .env.example .env && $EDITOR .env      # at minimum set ATV_ADDRESS
 docker compose up -d --build
 ```

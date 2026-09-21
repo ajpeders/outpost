@@ -199,10 +199,10 @@ directory plus `.env`:
 
 Continuous deployment is **pull-based, on the Pi** — no CI runner, no webhook,
 no homelab dependency (same constraint as everything else here).
-`smarthome-deploy.timer` runs `bin/deploy` every 3 min as `alex`:
+`outpost-deploy.timer` runs `bin/deploy` every 3 min as `alex`:
 
 1. Skip if the checkout is dirty, off `main`, ahead of origin, or diverged.
-2. Fetch; compare `origin/main` to `state/deploy/smarthome.deployed` (a stamp,
+2. Fetch; compare `origin/main` to `state/deploy/outpost.deployed` (a stamp,
    not `HEAD` — commits pushed *from* the Pi leave HEAD == origin while the
    running containers are stale).
 3. Defer if mpv is playing (`GUARD_CMD`), per the CLAUDE.md etiquette.
@@ -216,7 +216,7 @@ no homelab dependency (same constraint as everything else here).
    previous sha, redeploy it, record the bad sha so it isn't retried, alert.
 
 Decisions log to `state/deploy/deploy.log` (gitignored, one-deep rotation);
-build output to `state/deploy/smarthome.log`. `flock` serialises the timer
+build output to `state/deploy/outpost.log`. `flock` serialises the timer
 against hand runs.
 
 ## Failure behaviour

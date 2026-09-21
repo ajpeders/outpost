@@ -4,7 +4,7 @@ Step-by-step guides for the things you actually do. `README.md` is the overview,
 `ARCHITECTURE.md` explains the design.
 
 Throughout, `<pi>` is the Pi's address and the repo root is wherever you cloned
-it (currently `~/projects/smarthome`).
+it (currently `~/projects/outpost`).
 
 ## Set up a fresh Pi
 
@@ -28,8 +28,8 @@ sudo usermod -aG docker "$USER"   # log out and back in, or use sudo docker mean
 Then:
 
 ```sh
-git clone ssh://git@git.thelunadog.com:2222/alex/smarthome.git ~/projects/smarthome
-cd ~/projects/smarthome
+git clone ssh://git@git.thelunadog.com:2222/alex/outpost.git ~/projects/outpost
+cd ~/projects/outpost
 cp .env.example .env && $EDITOR .env      # at minimum set ATV_ADDRESS
 docker compose up -d --build
 ```
@@ -77,8 +77,8 @@ zstd -dc pi5-part3-config-etc-*.tar.zst | tar -x -C extract \
   --strip-components=3 'home/alex/livingroom-pi/data'             # runtime state
 
 # copy onto the Pi
-scp extract/.env <pi>:~/projects/smarthome/.env
-rsync -a extract/data/ <pi>:~/projects/smarthome/data/
+scp extract/.env <pi>:~/projects/outpost/.env
+rsync -a extract/data/ <pi>:~/projects/outpost/data/
 ```
 
 Parts 1 and 2 are truncated streams (the SD card died mid-backup); `zstd -dc |
@@ -168,7 +168,7 @@ On the Pi:
 
 ```sh
 sudo apt-get install -y cifs-utils
-sudo install -m 600 /dev/stdin /etc/smarthome-smb.credentials <<'EOF'
+sudo install -m 600 /dev/stdin /etc/outpost-smb.credentials <<'EOF'
 username=<smb-user>
 password=<smb-password>
 EOF
@@ -178,7 +178,7 @@ sudo mkdir -p /mnt/share
 Append this line to `/etc/fstab`:
 
 ```
-//<server>/<share> /mnt/share cifs credentials=/etc/smarthome-smb.credentials,ro,vers=3.1.1,iocharset=utf8,nosuid,nodev,noexec,_netdev,nofail,x-systemd.automount,x-systemd.mount-timeout=15s 0 0
+//<server>/<share> /mnt/share cifs credentials=/etc/outpost-smb.credentials,ro,vers=3.1.1,iocharset=utf8,nosuid,nodev,noexec,_netdev,nofail,x-systemd.automount,x-systemd.mount-timeout=15s 0 0
 ```
 
 Then activate it:
@@ -203,17 +203,17 @@ curl -s 'localhost:8080/api/media/list?path='    # lists the library root
 ## Update and redeploy
 
 **Automatic (normal path).** Push to `main`; the Pi redeploys itself. A systemd
-timer (`smarthome-deploy.timer`, every 3 min) runs `bin/deploy`, which fetches
+timer (`outpost-deploy.timer`, every 3 min) runs `bin/deploy`, which fetches
 `origin/main` and, if it advanced past the last deployed sha, fast-forwards,
 reinstalls + restarts the host screen units, rebuilds the containers, and
 health-checks. A failed build or health check rolls back to the previous commit.
 Every deploy or rollback posts to ntfy (`bin/ntfy-alert`, token in
-`~/.config/smarthome-deploy/.env`).
+`~/.config/outpost-deploy/.env`).
 
 ```sh
-systemctl status smarthome-deploy.timer          # enabled + waiting
-tail ~/projects/smarthome/state/deploy/deploy.log # decisions per tick
-cat  ~/projects/smarthome/state/deploy/smarthome.deployed   # sha now running
+systemctl status outpost-deploy.timer          # enabled + waiting
+tail ~/projects/outpost/state/deploy/deploy.log # decisions per tick
+cat  ~/projects/outpost/state/deploy/outpost.deployed   # sha now running
 ./bin/deploy                                     # run a tick by hand
 ```
 
@@ -221,12 +221,12 @@ It **defers** while mpv is playing (guard on `localhost:9595/status`), and
 **skips** if the checkout is dirty, not on `main`, ahead of origin, or diverged
 (diverged → one ntfy alert, then hands-off until you reconcile). A commit whose
 deploy failed is not retried until a new push lands. Config lives in
-`bin/deploy.d/smarthome.conf`; unit files are `/etc/systemd/system/smarthome-deploy.{service,timer}`.
+`bin/deploy.d/outpost.conf`; unit files are `/etc/systemd/system/outpost-deploy.{service,timer}`.
 
 **Manual** (when the timer is stopped or you need it now):
 
 ```sh
-cd ~/projects/smarthome
+cd ~/projects/outpost
 git pull
 docker compose up -d --build
 ```

@@ -15,7 +15,7 @@
 | Repo | Checkout to use | Notes |
 |---|---|---|
 | `alex/mtv` | `/home/agent/projects/mtv` (as user `agent`: `sudo -u agent -i` or `sudo -u agent bash -c '…'`) | Push to `main` → CI → auto-deploy on isis by `bin/deploy` (~3 min). The isis checkout `/home/ween/homelab/apps/mtv` has unrelated uncommitted edits to `app/index.html` and `app/mtv.js`; do not touch them. |
-| smarthome | `/home/alex/projects/smarthome` | **The working tree already contains an uncommitted, near-complete implementation of spec §2–§4 written by another session.** Chunk 2 reviews and finishes it rather than rewriting. Check `git status` before every edit; if files are changing under you, stop and tell the user. |
+| Outpost | `/home/alex/projects/outpost` | **The working tree already contains an uncommitted, near-complete implementation of spec §2–§4 written by another session.** Chunk 2 reviews and finishes it rather than rewriting. Check `git status` before every edit; if files are changing under you, stop and tell the user. |
 
 **Deploy etiquette (from `CLAUDE.md`):** before restarting `screen-player` on the Pi, `curl -s localhost:9595/status` must show `"playing": false`. Check `pgrep -af claude` for other sessions before deploying.
 
@@ -566,7 +566,7 @@ Expected: JSON with `now.id`, `now.offset`, `next.id`. If 404 `{"detail":"Not Fo
 
 ---
 
-## Chunk 2: smarthome — finish, verify, deploy
+## Chunk 2: Outpost — finish, verify, deploy
 
 The working tree already implements spec §2–§4 (uncommitted, by another session). This chunk reviews it against the spec, fixes the one known defect, gets the tests green, commits, and deploys. **Do not rewrite what exists.**
 
@@ -576,12 +576,12 @@ The working tree already implements spec §2–§4 (uncommitted, by another sess
 
 - [ ] **Step 1: Confirm nobody is editing**
 
-Run: `cd /home/alex/projects/smarthome && git status --short && find screen hub tests -newer docs/superpowers/plans/2026-09-19-mtv-mpv-rework.md -type f`
+Run: `cd /home/alex/projects/outpost && git status --short && find screen hub tests -newer docs/superpowers/plans/2026-09-19-mtv-mpv-rework.md -type f`
 Expected: the 13 modified/deleted files plus `tests/test_screen_player_mtv.py`; the `find` prints nothing (no file newer than this plan). If it prints files, another session is still active — stop and tell the user.
 
 - [ ] **Step 2: Run the existing tests as they stand**
 
-Run: `cd /home/alex/projects/smarthome && python3 -m unittest discover -s tests -p 'test_*.py' -v 2>&1 | tail -25`
+Run: `cd /home/alex/projects/outpost && python3 -m unittest discover -s tests -p 'test_*.py' -v 2>&1 | tail -25`
 Expected: all pass. Record any failures; they are Task 6 inputs.
 
 - [ ] **Step 3: Spec conformance checklist** — read the diff (`git diff`) and tick each:
@@ -682,7 +682,7 @@ Expected: all pass.
 This commits the other session's work plus the fix; review the diff once more, then:
 
 ```bash
-cd /home/alex/projects/smarthome
+cd /home/alex/projects/outpost
 git add -A
 git commit -m "mtv: play the broadcast through mpv, drop the chromium kiosk
 
@@ -713,20 +713,20 @@ Expected: `"playing": false`. If `true`, wait — do not restart anything. Note 
 - [ ] **Step 2: Pull the code onto the Pi**
 
 ```bash
-ssh pi5-alex 'cd ~/projects/smarthome && git pull --ff-only && git log --oneline -1'
+ssh pi5-alex 'cd ~/projects/outpost && git pull --ff-only && git log --oneline -1'
 ```
 
 - [ ] **Step 3: Remove the kiosk unit, reinstall the idle units**
 
 ```bash
-ssh pi5-alex 'sudo systemctl stop mtv-screen 2>/dev/null; sudo systemctl disable mtv-screen 2>/dev/null; sudo rm -f /etc/systemd/system/mtv-screen.service; sudo systemctl daemon-reload; cd ~/projects/smarthome && sudo screen/install-services.sh aerial-screen kiosk-screen && sudo systemctl daemon-reload && systemctl list-unit-files | grep -c mtv-screen'
+ssh pi5-alex 'sudo systemctl stop mtv-screen 2>/dev/null; sudo systemctl disable mtv-screen 2>/dev/null; sudo rm -f /etc/systemd/system/mtv-screen.service; sudo systemctl daemon-reload; cd ~/projects/outpost && sudo screen/install-services.sh aerial-screen kiosk-screen && sudo systemctl daemon-reload && systemctl list-unit-files | grep -c mtv-screen'
 ```
 Expected: last line `0`.
 
 - [ ] **Step 4: Restart screen-player (idle only) and rebuild the hub**
 
 ```bash
-ssh pi5-alex 'cd ~/projects/smarthome && sudo systemctl restart screen-player && sleep 2 && curl -s localhost:9595/status && DOCKER_BUILDKIT=0 docker compose build hub >/dev/null && docker compose up -d hub && sleep 5 && curl -s localhost:8080/api/screen/status'
+ssh pi5-alex 'cd ~/projects/outpost && sudo systemctl restart screen-player && sleep 2 && curl -s localhost:9595/status && DOCKER_BUILDKIT=0 docker compose build hub >/dev/null && docker compose up -d hub && sleep 5 && curl -s localhost:8080/api/screen/status'
 ```
 Expected: both status bodies return; `"mtv": true`.
 
@@ -753,5 +753,5 @@ git push origin main
 - [ ] **Step 6: Sync the agent user's clone**
 
 ```bash
-sudo -u agent bash -c 'cd /home/agent/projects/smarthome && git pull --ff-only'
+sudo -u agent bash -c 'cd /home/agent/projects/outpost && git pull --ff-only'
 ```

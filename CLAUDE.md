@@ -1,4 +1,4 @@
-# smarthome — working rules
+# Outpost — working rules
 
 This stack drives the living-room TV **live**. Restarts are user-visible.
 
