@@ -96,6 +96,18 @@ class ScreenPlayerMtvTests(unittest.TestCase):
         self.assertNotIn("--hls-bitrate=max", args)
         self.assertNotIn("https://example.test/videos/now-id.mp4", args)
 
+    def test_mtv_profile_buffers_deep_and_times_out_fast(self):
+        args = player._build_args("https://example.test/videos/now-id.mp4", None, False, "mtv")
+        # Whole files on Wi-Fi: a deep buffer rides out throughput dips.
+        self.assertIn("--cache-secs=30", args)
+        self.assertIn("--demuxer-readahead-secs=30", args)
+        self.assertIn("--network-timeout=5", args)
+
+    def test_live_profile_keeps_small_buffer_but_times_out_fast(self):
+        args = player._build_args("https://example.test/live.m3u8", None, False, "live")
+        self.assertIn("--cache-secs=4", args)
+        self.assertIn("--network-timeout=5", args)
+
     def test_play_mtv_uses_schedule_offset_profile(self):
         with patch.object(player, "_play") as play:
             result = player._play_mtv(self.base, 1)
@@ -185,6 +197,43 @@ class ScreenPlayerMtvTests(unittest.TestCase):
         with patch.object(player, "mtv_now", return_value=SCHEDULE):
             conductor._refresh()
 
+        self.assertIn(["loadfile", self.base + "/videos/now-id.mp4",
+                       "replace", -1, "start=12.5"], commands)
+
+    def _refresh_with_position(self, pos):
+        proc = object()
+        player._proc = proc
+        player._profile = "mtv"
+        player._stopped = False
+        conductor = player.MtvConductor(proc, {
+            "base": self.base,
+            "channel": 1,
+            "schedule": SCHEDULE,
+        })
+        commands = []
+
+        def command(value):
+            commands.append(value)
+            if value == ["get_property", "path"]:
+                return {"data": self.base + "/videos/now-id.mp4"}
+            if value == ["get_property", "time-pos"]:
+                return {"data": pos}
+            return {"error": "success"}
+
+        conductor.command = command
+        with patch.object(player, "mtv_now", return_value=SCHEDULE):
+            conductor._refresh()
+        return commands
+
+    def test_conductor_tolerates_small_drift_on_right_item(self):
+        # A buffering stall leaves the TV a few seconds behind the schedule;
+        # the next song starting from 0 must not be hard-reloaded (a visible hitch).
+        commands = self._refresh_with_position(SCHEDULE["now"]["offset"] - 8)
+        self.assertNotIn(["loadfile", self.base + "/videos/now-id.mp4",
+                          "replace", -1, "start=12.5"], commands)
+
+    def test_conductor_corrects_large_drift_on_right_item(self):
+        commands = self._refresh_with_position(SCHEDULE["now"]["offset"] + 12)
         self.assertIn(["loadfile", self.base + "/videos/now-id.mp4",
                        "replace", -1, "start=12.5"], commands)
 

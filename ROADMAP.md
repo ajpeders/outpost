@@ -154,7 +154,7 @@ the TV set (CEC), hosts the hub app, and runs scheduled automations.
   `GET /admin/api/now?ch=1` for the current item, wall-clock offset, next item,
   and credits. mpv starts idle on DRM, loads each MP4 with its own `start`
   option, preloads the successor, and rechecks at every boundary. It corrects
-  drift over two seconds, retries schedule outages without dropping a queued
+  drift over ten seconds (`SCREEN_MTV_DRIFT`), retries schedule outages without dropping a queued
   item, rejoins after a crash, and returns to the dashboard after 60 seconds of
   failed recovery.
 - **History:** the original `mtv-screen` cage/Chromium kiosk was removed. It
@@ -172,12 +172,19 @@ the TV set (CEC), hosts the hub app, and runs scheduled automations.
   hardware-decode path, scale OSD credits for the 4K framebuffer, and measure
   frame drops, CPU/GPU load, thermals, and song-boundary behavior. Keep 1080p
   as the fallback if native 4K cannot play cleanly.
-- **MTV cache sizing:** observed a brief remote-MP4 buffering event on
-  2026-09-19 where the 4-second cache underran, the cache refilled, and
-  playback recovered without a restart. Investigate raising the `mtv`
-  profile's cache and `demuxer-readahead-secs` to 20–30 seconds and verify
-  this stays below the live HLS path's behaviour, then validate on a long
-  song-boundary through one full track.
+- **MTV/jetstream stutter** ✅ *(2026-09-21)* — root cause: the Pi is on Wi-Fi
+  (eth0 unplugged; -42 dBm, link never dropped) and both profiles buffered only
+  4 s, so transient throughput dips emptied the cache and froze the picture.
+  On MTV each stall left the TV behind the wall-clock schedule, and the 2 s
+  drift check then hard-reloaded the next song (a second visible hitch). On
+  jetstream the server logged 11 gaps of 30 s+ with no HLS request in one hour
+  of a movie — mpv sat on a stalled read for up to its 60 s default network
+  timeout. Fixes: `mtv` cache/readahead 4 → 30 s, drift tolerance 2 → 10 s,
+  `--network-timeout=5` on all profiles. The live profile keeps its 4 s buffer
+  (stays near the live edge). Ruled out: CPU, thermals, schedule durations,
+  Wi-Fi power save (A/B'd, no difference). Remaining: plug the Pi into
+  Ethernet; verify on the next long jetstream session that the 30 s viewer
+  gaps are gone (`docker logs jetstream | grep "192.168.0.220 (idle"`).
 - **MTV persistent on-screen credits:** today's `show-text` call from the
   `MtvConductor` displays artist/song for 8 seconds at song start and once
   near the end. Users want the credits to stay on screen for the entire

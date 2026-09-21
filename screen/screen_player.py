@@ -247,8 +247,11 @@ def _build_args(url: str | None, headers: dict | None, audio_only: bool,
         # (~5% CPU, smooth playback). For H.264 streams (legacy files before
         # the mtv library was re-encoded, or anything YouTube hands us as
         # avc1) mpv falls back to software decode — same as before, no worse.
+        # Deep buffer: these are whole files, not a live edge, and the Pi is on
+        # Wi-Fi — a 4s cache underran on throughput dips, froze the picture and
+        # left the TV behind the schedule (then hard-reloaded at the next song).
         video = ["--vo=drm", f"--drm-mode={m}", "--hwdec=v4l2m2m",
-                 "--cache=yes", "--cache-secs=4", "--demuxer-readahead-secs=4",
+                 "--cache=yes", "--cache-secs=30", "--demuxer-readahead-secs=30",
                  "--sid=no", "--sub-auto=no", f"--input-ipc-server={IPC_SOCKET}",
                  "--idle=yes", "--prefetch-playlist=yes",
                  "--osd-font-size=42", "--osd-margin-x=56", "--osd-margin-y=46",
@@ -271,6 +274,9 @@ def _build_args(url: str | None, headers: dict | None, audio_only: bool,
             # NO --loop: on a live HLS stream it treats the live edge as EOF and
             # jumps back to the start of the segment window (~30s rewind).
             "--keep-open=no",
+            # a stalled HTTP read (Wi-Fi hiccup) hangs mpv for the 60s default
+            # before it retries — the picture freezes the whole time
+            "--network-timeout=5",
             "--no-config", "--force-window=yes"]
     if audio_only:
         args = [a for a in args if not a.startswith(("--vo", "--gpu-context", "--drm-mode"))]
@@ -625,6 +631,13 @@ def _credits_osd_text(credits: str) -> str:
     return _CREDITS_OSD_PREFIX + credits
 
 
+# How far (s) the TV may trail the broadcast schedule before the conductor
+# reloads the item at the scheduled offset. A buffering stall leaves playback a
+# few seconds behind; at 2s every such stall turned the next song boundary into
+# a visible reload + seek. The TV runs up to this far behind other viewers.
+MTV_DRIFT_TOLERANCE = float(os.environ.get("SCREEN_MTV_DRIFT", "10"))
+
+
 class MtvConductor(threading.Thread):
     """Keep one idle mpv process joined to MTV's wall-clock schedule."""
 
@@ -718,7 +731,8 @@ class MtvConductor(threading.Thread):
         pos_reply = self.command(["get_property", "time-pos"])
         pos = pos_reply.get("data") if pos_reply else None
         expected = _mtv_item_url(self.state["base"], data, data["now"])
-        matched = path == expected and pos is not None and abs(float(pos) - float(data["now"]["offset"])) <= 2
+        matched = (path == expected and pos is not None
+                   and abs(float(pos) - float(data["now"]["offset"])) <= MTV_DRIFT_TOLERANCE)
         if not matched:
             if self.correction_pending:
                 _log_event("MTV still differs after correction — waiting for next boundary")
