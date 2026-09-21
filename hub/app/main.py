@@ -34,6 +34,7 @@ CEC_URL = os.environ.get("CEC_URL", "http://localhost:8020").rstrip("/")
 # Which TV HDMI port the Apple TV is on (CEC phys addr n.0.0.0) — lets us force
 # the input switch with Set Stream Path instead of waiting for tvOS to assert.
 ATV_HDMI_INPUT = int(os.environ.get("ATV_HDMI_INPUT", "3"))
+PI_HDMI_INPUT = int(os.environ.get("PI_HDMI_INPUT", "1"))
 # Pi-side mpv screen player (fallback path; plays video on the Pi's HDMI)
 SCREEN_URL = os.environ.get("SCREEN_URL", "http://localhost:9595").rstrip("/")
 # jetstream broadcast (HLS from the homelab jetstream service), AirPlayed to the
@@ -1272,8 +1273,11 @@ async def _cec_status_stale() -> None:
 # --- TV input switcher (CEC) ---
 @app.get("/api/input/status")
 async def input_status():
-    """Which HDMI source we last drove the TV to (for highlighting the switcher)."""
-    return {"active": _active_input}
+    """Which HDMI source we last drove the TV to, plus the port number for
+    the switcher highlight. `active` is the source name; `hdmi` is the port
+    it lives on (None if unknown / no source)."""
+    hdmi = {"pi": PI_HDMI_INPUT, "appletv": ATV_HDMI_INPUT}.get(_active_input)
+    return {"active": _active_input, "hdmi": hdmi}
 
 
 @app.post("/api/input/appletv")

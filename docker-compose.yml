@@ -55,7 +55,11 @@ services:
       ATV_URL: http://localhost:${ATV_API_PORT:-8010}
       CEC_URL: http://localhost:${CEC_API_PORT:-8020}
       TZ: ${TZ:-UTC}                   # alarm times are wall-clock in this zone
-      # which TV HDMI port the Apple TV is on (CEC Set Stream Path target)
+      # which TV HDMI port each device is on (CEC Set Stream Path target).
+      # Pi: dashboard / mpv. Apple TV: anything AirPlay/Apple Music routed
+      # through the Apple TV. The hub's input highlight reads these back so the
+      # matching button lights up.
+      PI_HDMI_INPUT: ${PI_HDMI_INPUT:-1}
       ATV_HDMI_INPUT: ${ATV_HDMI_INPUT:-3}
       PLEX_URL: ${PLEX_URL:-}
       PLEX_TOKEN: ${PLEX_TOKEN:-}

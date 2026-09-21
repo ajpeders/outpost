@@ -845,6 +845,10 @@ $('#w-music').addEventListener('click', async () => {
 async function switchHdmi(n, button) {
   toast('Switching to HDMI ' + n);
   setBusy(button, true);
+  // optimistic highlight — /api/tv/input/{n} doesn't update the hub's
+  // _active_input (it's a raw CEC proxy), so without this the highlight
+  // wouldn't move until the next event that does update the state.
+  $$('#input-seg button').forEach(b => b.classList.toggle('active', b.dataset.hdmi === String(n)));
   const r = await api('POST', '/api/tv/input/' + n);
   setBusy(button, false);
   if (!r.ok) toast(r.data?.error || 'Input switch failed');
@@ -855,8 +859,9 @@ $$('[data-hdmi]').forEach(b => b.addEventListener('click', e => switchHdmi(b.dat
 async function refreshInput() {
   const r = await api('GET', '/api/input/status');
   const active = r.ok ? (r.data?.active || 'pi') : null;
-  // the Pi sits on HDMI 1 — highlight it when the Pi is the active source
-  $$('#input-seg button').forEach(b => b.classList.toggle('active', active === 'pi' && b.dataset.hdmi === '1'));
+  // highlight whichever HDMI port the hub thinks is live — null = no source.
+  const hdmi = r.data?.hdmi != null ? String(r.data.hdmi) : null;
+  $$('#input-seg button').forEach(b => b.classList.toggle('active', b.dataset.hdmi === hdmi));
   return active;
 }
 
